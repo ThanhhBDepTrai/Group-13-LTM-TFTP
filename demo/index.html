@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TFTP Visualizer — Nhóm 2 (Core Demo)</title>
+<style>
+  *{box-sizing:border-box} body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#0f172a;color:#e2e8f0}
+  header{background:#1e293b;padding:12px 20px;border-bottom:2px solid #38bdf8}
+  header h1{margin:0;font-size:18px} header p{margin:4px 0 0;font-size:13px;color:#94a3b8}
+  .wrap{display:grid;grid-template-columns:320px 1fr 340px;gap:12px;padding:12px;max-width:1400px;margin:auto}
+  .card{background:#1e293b;border-radius:10px;padding:14px;border:1px solid #334155}
+  .card h3{margin:0 0 10px;font-size:14px;color:#38bdf8;text-transform:uppercase}
+  label{font-size:13px;display:block;margin:8px 0 4px;color:#cbd5e1}
+  input[type=text],select{width:100%;padding:7px;border-radius:6px;border:1px solid #475569;background:#0f172a;color:#fff}
+  button{cursor:pointer;border:0;border-radius:8px;padding:9px 12px;font-weight:600;margin-top:8px;width:100%}
+  .btn-rrq{background:#22c55e;color:#052e16} .btn-wrq{background:#f59e0b;color:#451a03}
+  .btn-ghost{background:#334155;color:#fff;width:auto;padding:7px 12px;margin-right:6px}
+  .row{display:flex;gap:8px;align-items:center;font-size:13px;margin-top:8px}
+  input[type=range]{flex:1}
+  /* diagram */
+  #diagram{position:relative;height:300px;background:#0b1220;border-radius:10px;border:1px solid #334155;overflow:hidden}
+  .node{position:absolute;top:40px;width:150px;text-align:center;background:#1e293b;border:2px solid #38bdf8;border-radius:10px;padding:10px}
+  .node small{display:block;color:#94a3b8;margin-top:4px;font-size:12px}
+  #clientNode{left:20px} #serverNode{right:20px;border-color:#f59e0b}
+  #wire{position:absolute;top:150px;left:180px;right:180px;height:2px;background:#475569}
+  #packet{position:absolute;top:132px;left:0;transform:translateX(-50%);background:#38bdf8;color:#04263b;font-weight:700;font-size:12px;padding:5px 10px;border-radius:16px;white-space:nowrap;display:none;box-shadow:0 0 12px #38bdf8}
+  #packet.loss{background:#ef4444;color:#fff;box-shadow:0 0 12px #ef4444}
+  #packet.err{background:#ef4444;color:#fff} #packet.ack{background:#22c55e;color:#052e16;box-shadow:0 0 12px #22c55e}
+  #stepInfo{text-align:center;margin-top:170px;font-size:13px;color:#cbd5e1;min-height:40px;padding:0 10px}
+  #stats{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .stat{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:6px 10px;font-size:12px}
+  /* log + inspector */
+  #log{height:300px;overflow-y:auto;background:#020617;border-radius:8px;padding:8px;font-family:Consolas,monospace;font-size:12px}
+  #log div{margin:3px 0;padding:3px 6px;border-radius:4px;background:#0f172a}
+  #log .tmo{background:#451a03;color:#fdba74} #log .loss{background:#450a0a;color:#fca5a5}
+  #log .ok{background:#052e16;color:#86efac} #log .tid{background:#1e1b4b;color:#c7d2fe}
+  #inspector{background:#020617;border-radius:8px;padding:8px;font-family:Consolas,monospace;font-size:12px;min-height:140px;white-space:pre-wrap;word-break:break-all}
+  #eventList{max-height:150px;overflow-y:auto;margin-top:8px;font-size:12px}
+  #eventList div{padding:4px 6px;border-radius:4px;cursor:pointer;margin:2px 0;background:#0f172a}
+  #eventList div.active{background:#38bdf8;color:#04263b;font-weight:700}
+  footer{text-align:center;color:#64748b;font-size:12px;padding:10px}
+  @media(max-width:1000px){.wrap{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>TFTP PROTOCOL VISUALIZER — Nhóm 2 (Bản Core của Nhóm trưởng)</h1>
+  <p>Minh họa RFC 1350: Stop-and-Wait • TID 69 → port ngẫu nhiên • DATA cuối &lt;512B • Timeout gửi lại — mở file này là chạy, không cần cài đặt</p>
+</header>
+
+<div class="wrap">
+  <!-- Controls -->
+  <div class="card">
+    <h3>Bảng điều khiển</h3>
+    <label>Tên file</label>
+    <input id="filename" type="text" value="test.txt">
+    <label>Kích thước file giả lập</label>
+    <select id="filesize">
+      <option value="200">200B — 1 block (kết thúc ngay)</option>
+      <option value="600">600B — 2 block (512+88)</option>
+      <option value="1500" selected>1500B — 3 block (512+512+476)</option>
+      <option value="1024">1024B — case đặc biệt (512+512+0B)</option>
+      <option value="0">0B — file rỗng</option>
+    </select>
+    <div class="row"><input id="loss" type="checkbox"> <span>Giả lập mất gói DATA #2 (xem Timeout)</span></div>
+    <div class="row"><input id="notfound" type="checkbox"> <span>Giả lập file không tồn tại (ERROR 1)</span></div>
+    <label>Tốc độ mô phỏng</label>
+    <div class="row"><span>Chậm</span><input id="speed" type="range" min="1" max="10" value="4"><span>Nhanh</span></div>
+    <button class="btn-rrq" onclick="startSim('download')">▶ Bắt đầu tải file (RRQ)</button>
+    <button class="btn-wrq" onclick="startSim('upload')">▲ Bắt đầu upload (WRQ)</button>
+    <div style="margin-top:8px">
+      <button class="btn-ghost" onclick="pauseSim()">⏸ Tạm dừng</button>
+      <button class="btn-ghost" onclick="resetSim()">↺ Reset</button>
+    </div>
+    <div id="stats"></div>
+  </div>
+
+  <!-- Diagram -->
+  <div class="card">
+    <h3>Sơ đồ động Client — Server</h3>
+    <div id="diagram">
+      <div class="node" id="clientNode">🖥️ CLIENT<small id="clientPort">port 50000</small></div>
+      <div class="node" id="serverNode">🗄️ SERVER<small id="serverPort">port 69 (well-known)</small></div>
+      <div id="wire"></div>
+      <div id="packet"></div>
+      <div id="stepInfo">Nhấn RRQ / WRQ để bắt đầu mô phỏng…</div>
+    </div>
+    <div id="eventList"></div>
+  </div>
+
+  <!-- Inspector + Log -->
+  <div class="card">
+    <h3>Packet Inspector (click gói bên trái để soi)</h3>
+    <div id="inspector">Chưa có gói nào.</div>
+    <h3 style="margin-top:12px">Console Log (FSM)</h3>
+    <div id="log"></div>
+  </div>
+</div>
+
+<footer>Core: /core/tftpPackets.js + fsmEngine.js • Mở bằng browser hoặc chạy <code>node core/core.test.js</code> để kiểm thử</footer>
+
+<script src="../core/tftpPackets.js"></script>
+<script src="../core/fsmEngine.js"></script>
+<script>
+var P = window.TftpPackets, FSM = window.TftpFsm;
+var simData = null, timer = null, idx = 0, playing = false;
+
+function log(msg, cls){
+  var box = document.getElementById('log');
+  var d = document.createElement('div');
+  if(cls) d.className = cls;
+  d.textContent = msg;
+  box.appendChild(d); box.scrollTop = box.scrollHeight;
+}
+function startSim(direction){
+  resetSim(true);
+  var filename = document.getElementById('filename').value || 'test.txt';
+  var fileSize = parseInt(document.getElementById('filesize').value, 10);
+  var loss = document.getElementById('loss').checked;
+  var notfound = document.getElementById('notfound').checked;
+  // lossBlock: lay block #2 neu file >= 2 block, nguoc lai block #1
+  var lossBlock = loss ? (fileSize > 512 ? 2 : 1) : null;
+  var sim = new FSM.TftpSimulator({filename, fileSize, direction, lossBlock, fileNotFound: notfound});
+  simData = sim.run();
+  document.getElementById('clientPort').textContent = 'port ' + simData.stats.clientPort;
+  document.getElementById('serverPort').textContent = 'port 69 → TID ' + simData.stats.serverTid;
+  document.getElementById('stats').innerHTML =
+    '<div class="stat">Hướng: '+direction.toUpperCase()+'</div>'+
+    '<div class="stat">Blocks: '+simData.stats.blocks+'</div>'+
+    '<div class="stat">Timeout: '+simData.stats.timeouts+'</div>'+
+    '<div class="stat">Lỗi: '+(simData.stats.errored?'CÓ':'không')+'</div>';
+  // render event list
+  var list = document.getElementById('eventList'); list.innerHTML = '';
+  simData.events.forEach(function(e,i){
+    var d = document.createElement('div');
+    d.id = 'ev'+i; d.textContent = (i+1)+'. '+(e.label || e.action)+' — '+e.desc;
+    d.onclick = function(){ showInspector(i); };
+    list.appendChild(d);
+  });
+  // log FSM
+  document.getElementById('log').innerHTML = '';
+  simData.logs.forEach(function(l){
+    var cls = /TIMEOUT/.test(l.state)?'tmo':/LOSS/.test(l.state)?'loss':/COMPLETE|ACK_SENT/.test(l.state)?'ok':/TID/.test(l.state)?'tid':'';
+    log('['+l.side+']['+l.state+'] '+l.message, cls);
+  });
+  playing = true; idx = 0; playStep();
+}
+function speedDelay(){
+  var v = parseInt(document.getElementById('speed').value,10); // 1..10
+  return 2200 - v*190; // 1->2010ms, 10->300ms
+}
+function playStep(){
+  if(!playing || !simData) return;
+  if(idx >= simData.events.length){
+    document.getElementById('stepInfo').textContent = '✔ Hoàn tất phiên ('+simData.events.length+' sự kiện). Gói DATA cuối <512B = kết thúc.';
+    playing = false; return;
+  }
+  var e = simData.events[idx];
+  animate(e, function(){ idx++; timer = setTimeout(playStep, 350); });
+}
+function animate(e, done){
+  var pkt = document.getElementById('packet');
+  var info = document.getElementById('stepInfo');
+  document.querySelectorAll('#eventList div').forEach(x=>x.classList.remove('active'));
+  var el = document.getElementById('ev'+e.seq);
+  if(el){ el.classList.add('active'); el.scrollIntoView({block:'nearest'}); }
+  showInspector(e.seq);
+  info.textContent = '['+(e.seq+1)+'/'+simData.events.length+'] '+e.desc;
+  if(e.action==='TID_SWITCH'){
+    document.getElementById('serverPort').textContent = 'port TID ' + e.toPort + ' (đã rời 69)';
+    log('>>> '+e.desc,'tid'); done(); return;
+  }
+  if(e.action==='TIMEOUT'){ log('>>> '+e.desc,'tmo'); done(); return; }
+  if(e.action==='PACKET_LOSS'){ log('>>> '+e.desc,'loss'); done(); return; }
+  // bay tu trai<->phai
+  var fromLeft = (e.from==='client');
+  pkt.style.display = 'block';
+  pkt.textContent = e.label || e.action;
+  pkt.className = '';
+  if(e.action==='ERROR') pkt.className='err';
+  else if(e.action==='ACK') pkt.className='ack';
+  else if(/RETRANSMIT|LOSS/.test(e.action)) pkt.className='loss';
+  var L0 = fromLeft?180:document.getElementById('diagram').clientWidth-180;
+  var L1 = fromLeft?document.getElementById('diagram').clientWidth-180:180;
+  var dur = speedDelay();
+  pkt.style.transition = 'none'; pkt.style.left = L0+'px';
+  requestAnimationFrame(function(){
+    pkt.style.transition = 'left '+dur+'ms linear';
+    pkt.style.left = L1+'px';
+    setTimeout(function(){ pkt.style.display='none'; done(); }, dur+60);
+  });
+}
+function showInspector(i){
+  if(!simData) return;
+  var e = simData.events[i];
+  var box = document.getElementById('inspector');
+  var s = 'Seq #'+e.seq+'  '+e.action+'  '+e.from+' → '+e.to+'\n'+e.desc+'\n';
+  if(e.fromPort) s += 'Ports: '+e.fromPort+' → '+e.toPort+'\n';
+  if(e.block!=null) s += 'Block: #'+e.block+'\n';
+  if(e.bytes){ s += 'Len: '+e.bytes.length+' bytes\nHex: '+e.hex+'\n\nHexdump (64B đầu):\n'+e.hexDump; }
+  else s += '(sự kiện mạng nội bộ, không có bytes)';
+  box.textContent = s;
+}
+function pauseSim(){ playing = false; clearTimeout(timer); document.getElementById('stepInfo').textContent += ' (đang dừng)'; }
+function resetSim(silent){
+  playing = false; clearTimeout(timer); idx = 0; simData = null;
+  document.getElementById('packet').style.display='none';
+  if(!silent){
+    document.getElementById('stepInfo').textContent='Nhấn RRQ / WRQ để bắt đầu mô phỏng…';
+    document.getElementById('eventList').innerHTML='';
+    document.getElementById('inspector').textContent='Chưa có gói nào.';
+    document.getElementById('stats').innerHTML='';
+  }
+}
+</script>
+</body>
+</html>
