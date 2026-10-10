@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TFTP Visualizer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>TFTP Visualizer</h1>
+    <p>RFC 1350: truyền file từng khối 512 byte, gửi DATA rồi chờ ACK</p>
+  </header>
+
+  <main class="layout">
+    <section class="panel controls" aria-labelledby="h-ctrl">
+      <h2 id="h-ctrl">Điều khiển</h2>
+
+      <div class="btn-row">
+        <button id="btn-rrq" class="btn btn-rrq" type="button">Tải file về (RRQ)</button>
+        <button id="btn-wrq" class="btn btn-wrq" type="button">Tải file lên (WRQ)</button>
+      </div>
+
+      <label class="field">
+        <span>Tên file</span>
+        <input id="in-name" type="text" value="test.txt" maxlength="30" autocomplete="off" spellcheck="false">
+      </label>
+
+      <label class="field">
+        <span>Kích thước file giả lập</span>
+        <select id="sel-size">
+          <option value="200">200 B (1 khối, kết thúc ngay)</option>
+          <option value="600">600 B (2 khối: 512 + 88)</option>
+          <option value="1500" selected>1500 B (3 khối: 512 + 512 + 476)</option>
+          <option value="1024">1024 B (512 + 512 + 0, thêm khối rỗng)</option>
+          <option value="0">0 B (file rỗng)</option>
+        </select>
+      </label>
+
+      <fieldset class="field">
+        <legend>Giả lập sự cố</legend>
+        <label class="check"><input id="cb-loss" type="checkbox"> Mất gói DATA #2 (xem hết giờ rồi gửi lại)</label>
+        <label class="check"><input id="cb-error" type="checkbox"> Lỗi file (RRQ: không có file, WRQ: bị từ chối ghi)</label>
+      </fieldset>
+
+      <label class="field">
+        <span>Tốc độ mô phỏng: <output id="out-speed">1.0x</output></span>
+        <input id="rng-speed" type="range" min="0.25" max="3" step="0.25" value="1">
+      </label>
+
+      <div class="btn-row">
+        <button id="btn-pause" class="btn btn-ghost" type="button" disabled>Tạm dừng</button>
+        <button id="btn-reset" class="btn btn-ghost" type="button">Đặt lại</button>
+      </div>
+
+      <dl id="stats" class="stats" hidden></dl>
+
+      <dl class="legend" aria-label="Chú thích màu gói tin">
+        <div><dt class="sw sw-rrq"></dt><dd>RRQ / WRQ: yêu cầu đọc / ghi</dd></div>
+        <div><dt class="sw sw-data"></dt><dd>DATA: khối dữ liệu</dd></div>
+        <div><dt class="sw sw-ack"></dt><dd>ACK: xác nhận</dd></div>
+        <div><dt class="sw sw-error"></dt><dd>ERROR: báo lỗi</dd></div>
+      </dl>
+    </section>
+
+    <section class="stage-wrap" aria-labelledby="h-stage">
+      <h2 id="h-stage" class="sr-only">Sơ đồ trao đổi gói tin</h2>
+      <div class="heads">
+        <div class="head head-c">
+          <strong>Client</strong>
+          <span>Cổng <b id="c-port">50000</b></span>
+          <span>Trạng thái <b id="c-state" class="state">IDLE</b></span>
+        </div>
+        <div class="head head-s">
+          <strong>Server</strong>
+          <span>Cổng <b id="s-port">69</b></span>
+          <span>Trạng thái <b id="s-state" class="state">LISTEN</b></span>
+        </div>
+      </div>
+      <div class="stage" id="stage">
+        <p id="stage-empty" class="empty">Chọn <b>Tải file về</b> hoặc <b>Tải file lên</b> để bắt đầu. Bấm vào một gói tin trên sơ đồ để xem từng byte.</p>
+        <svg id="ladder" viewBox="0 0 600 400" role="img" aria-label="Sơ đồ gói tin giữa Client và Server"></svg>
+      </div>
+    </section>
+
+    <aside class="panel inspector" aria-labelledby="h-insp" aria-live="polite">
+      <h2 id="h-insp">Giải phẫu gói tin</h2>
+      <div id="insp-body">
+        <p class="hint">Chưa chọn gói tin nào. Bấm vào một mũi tên trên sơ đồ.</p>
+      </div>
+    </aside>
+
+    <section class="panel log" aria-labelledby="h-log">
+      <h2 id="h-log">Nhật ký giao thức (FSM)</h2>
+      <ol id="log-list"></ol>
+    </section>
+  </main>
+
+  <!-- Core của TV1 (giữ nguyên), rồi cầu nối và giao diện của TV2 -->
+  <script src="../core/tftpPackets.js"></script>
+  <script src="../core/fsmEngine.js"></script>
+  <script src="coreAdapter.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
