@@ -52,6 +52,7 @@
     .btn { background-color: var(--accent-blue); color: #000; border: none; padding: 0.6rem 1rem; border-radius: 6px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; font-size: 0.875rem; width: 100%; margin-top: 0.5rem; }
     .btn:hover { opacity: 0.9; }
     .btn-danger { background-color: var(--accent-red); color: #fff; }
+    .btn-inactive { background-color: #334155; color: #fff; }
 
     .canvas-container { background-color: #090d16; border: 1px solid var(--border-color); border-radius: 8px; padding: 0.5rem; text-align: center; margin-bottom: 1rem; }
     
@@ -61,9 +62,13 @@
     .log-box { height: 150px; overflow-y: auto; background-color: #090d16; border: 1px solid var(--border-color); border-radius: 6px; padding: 0.5rem 0.75rem; font-family: monospace; font-size: 0.75rem; color: #38bdf8; }
     .log-line { margin-bottom: 0.25rem; word-break: break-all; }
 
-    .client-list { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
+    .client-list { max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
     .client-item { background-color: #0f172a; border: 1px solid var(--border-color); border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.8rem; display: flex; align-items: center; justify-content: space-between; }
     
+    .chat-box { height: 120px; overflow-y: auto; background-color: #090d16; border: 1px solid var(--border-color); border-radius: 6px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.8rem; display: flex; flex-direction: column; gap: 0.4rem; }
+    .chat-msg { background-color: #1e293b; padding: 0.4rem 0.6rem; border-radius: 4px; word-break: break-word; }
+    .chat-msg b { color: var(--accent-blue); }
+
     .color-picker { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
     .color-btn { width: 32px; height: 32px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
     .color-btn.active { border-color: #fff; transform: scale(1.1); }
@@ -192,7 +197,7 @@
     <div id="tab3" class="tab-content">
       <div class="grid-sidebar">
         <div>
-          <div class="card">
+          <div class="card" style="padding-bottom: 0.75rem;">
             <div class="card-title">
               <span>Trạng Thái Kết Nối MQTT</span>
               <span id="connStatus" class="badge badge-amber">Đang kết nối...</span>
@@ -205,20 +210,34 @@
             </p>
           </div>
 
-          <div class="card">
+          <div class="card" style="padding-bottom: 0.75rem;">
             <div class="card-title">
-              <span>Danh Sách Client Trực Tuyến</span>
+              <span>Danh Sách Client & Chat</span>
               <span id="clientCountBadge" class="badge badge-blue">0 Online</span>
             </div>
-            <div class="client-list" id="clientListContainer">
+            <div class="client-list" id="clientListContainer" style="margin-bottom: 0.75rem;">
               <div style="font-size: 0.8rem; color: var(--text-muted); text-align: center; padding: 1rem;">Đang đồng bộ danh sách...</div>
+            </div>
+            <!-- KHUNG CHAT BROADCAST MỚI -->
+            <div class="chat-box" id="chatLogs"></div>
+            <div style="display: flex; gap: 0.5rem;">
+              <input type="text" id="chatInput" placeholder="Nhập tin nhắn..." style="flex: 1; padding: 0.4rem; border-radius: 4px; border: 1px solid var(--border-color); background: #1e293b; color: white; font-size: 0.8rem;" onkeypress="if(event.key === 'Enter') sendChat()">
+              <button class="btn" style="width: auto; padding: 0.4rem 0.8rem; margin-top: 0;" onclick="sendChat()">Gửi</button>
             </div>
           </div>
 
           <div class="card">
-            <div class="card-title"><span>Công Cụ Vẽ</span></div>
+            <div class="card-title"><span>Công Cụ Tương Tác</span></div>
+            <!-- NÚT CHUYỂN CHẾ ĐỘ MỚI -->
             <div style="margin-bottom: 0.75rem;">
-              <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Màu sắc nét cọ:</label>
+              <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Chế độ thao tác:</label>
+              <div style="display: flex; gap: 0.5rem;">
+                <button class="btn" id="btnDraw" onclick="setMode('draw')">✏️ Vẽ nét cọ</button>
+                <button class="btn btn-inactive" id="btnText" onclick="setMode('text')">🔤 Gõ từ khóa</button>
+              </div>
+            </div>
+            <div style="margin-bottom: 0.75rem;">
+              <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Màu sắc:</label>
               <div class="color-picker">
                 <div class="color-btn active" style="background-color: #0f172a;" onclick="setColor('#0f172a', this)"></div>
                 <div class="color-btn" style="background-color: #ef4444;" onclick="setColor('#ef4444', this)"></div>
@@ -227,31 +246,31 @@
               </div>
             </div>
             <div style="margin-bottom: 1rem;">
-              <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Độ dày: <span id="sizeVal">4</span>px</label>
-              <input type="range" id="brushSize" min="1" max="20" value="4" style="width: 100%; accent-color: var(--accent-blue);" oninput="document.getElementById('sizeVal').textContent=this.value">
+              <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Độ dày nét / Cỡ chữ: <span id="sizeVal">4</span></label>
+              <input type="range" id="brushSize" min="1" max="40" value="4" style="width: 100%; accent-color: var(--accent-blue);" oninput="document.getElementById('sizeVal').textContent=this.value">
             </div>
             <button class="btn btn-danger" onclick="clearBoard()">Xóa Sạch Bảng Chung</button>
           </div>
 
           <div class="card">
-            <div class="card-title"><span>Nhật Ký Thao Tác & Mạng</span></div>
+            <div class="card-title"><span>Nhật Ký Mạng</span></div>
             <div class="log-box" id="netLogs"></div>
           </div>
         </div>
 
         <div class="card" style="display: flex; flex-direction: column;">
           <div class="card-title">
-            <span>Bảng Vẽ Phân Tán (Hỗ trợ PC & Điện thoại cuộn trang)</span>
+            <span>Bảng Vẽ Phân Tán (Hỗ trợ PC & Điện thoại)</span>
             <span class="badge badge-green">Optimized Touch</span>
           </div>
-          <div class="canvas-container" style="flex: 1; margin-bottom: 0;">
+          <div class="canvas-container" style="flex: 1; margin-bottom: 0; position: relative;">
             <canvas id="whiteboard" class="drawing-canvas" width="1000" height="600" style="height: 560px;"></canvas>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- TAB 4: PHÂN TÍCH GÓI TIN BẰNG WIRESHARK (MỚI BỔ SUNG) -->
+    <!-- TAB 4: PHÂN TÍCH GÓI TIN BẰNG WIRESHARK -->
     <div id="tab4" class="tab-content">
       <div class="card">
         <div class="card-title">
@@ -259,7 +278,7 @@
           <span class="badge badge-green">Network Forensics</span>
         </div>
         <p class="theory-text">
-          Vì ứng dụng chạy trên giao thức <b>MQTT over WebSockets (<code class="inline-code">wss://</code> - cổng 8884)</b>, toàn bộ gói tin MQTT sẽ được đóng gói bên trong lớp bảo mật TLS/SSL mã hóa và lớp giao vận TCP. Dưới đây là quy trình chuẩn xác để sinh viên bắt và đọc gói tin trên Wireshark hoặc công cụ tương đương (như <i>TCP Dumump</i> hoặc <i>Browser Developer Tools</i>):
+          Vì ứng dụng chạy trên giao thức <b>MQTT over WebSockets (<code class="inline-code">wss://</code> - cổng 8884)</b>, toàn bộ gói tin MQTT sẽ được đóng gói bên trong lớp bảo mật TLS/SSL mã hóa và lớp giao vận TCP. Dưới đây là quy trình chuẩn xác để sinh viên bắt và đọc gói tin trên Wireshark hoặc công cụ tương đương:
         </p>
 
         <div class="step-box">
@@ -269,7 +288,7 @@
           </p>
           <ul class="theory-list" style="margin-bottom: 0;">
             <li>Lọc theo cổng TCP: <code class="inline-code">tcp.port == 8884</code></li>
-            <li>Lọc theo giao thức WebSocket thô trước khi mã hóa (nếu bắt ở môi trường local): <code class="inline-code">websocket</code> hoặc <code class="inline-code">tls</code></li>
+            <li>Lọc theo giao thức WebSocket thô trước khi mã hóa: <code class="inline-code">websocket</code> hoặc <code class="inline-code">tls</code></li>
           </ul>
         </div>
 
@@ -277,22 +296,9 @@
           <h4>Bước 2: Nhận diện các giai đoạn gói tin mạng</h4>
           <ul class="theory-list" style="margin-bottom: 0;">
             <li><b>TCP 3-Way Handshake:</b> Các gói tin <code class="inline-code">SYN</code>, <code class="inline-code">SYN-ACK</code>, <code class="inline-code">ACK</code> thiết lập kết nối giữa trình duyệt và <code class="inline-code">broker.hivemq.com</code>.</li>
-            <li><b>TLS Handshake (Client Hello / Server Hello):</b> Quá trình bắt tay bảo mật để trao đổi khóa mã hóa phiên truyền thông (vì dùng giao thức <code class="inline-code">wss://</code>).</li>
-            <li><b>WebSocket Frame / MQTT Payload:</b> Khi bạn thực hiện vẽ trên Tab 3, các gói tin dữ liệu chuyển động qua lại dạng khung WebSocket chứa nội dung JSON của MQTT Publish.</li>
+            <li><b>TLS Handshake (Client Hello / Server Hello):</b> Quá trình bắt tay bảo mật để trao đổi khóa.</li>
+            <li><b>WebSocket Frame / MQTT Payload:</b> Gói tin chứa nội dung JSON của nét vẽ, tin nhắn chat và văn bản được Broadcast qua MQTT Publish.</li>
           </ul>
-        </div>
-
-        <div class="step-box">
-          <h4>Công cụ thay thế tuyệt vời: Trình duyệt Developer Tools (F12)</h4>
-          <p class="theory-text" style="margin-bottom: 0.5rem;">
-            Vì Wireshark phải giải mã lớp TLS khá phức tạp, bạn có thể hướng dẫn sinh viên dùng ngay tính năng có sẵn trên trình duyệt để soi trực tiếp nội dung gói tin MQTT mà không sợ bị mã hóa:
-          </p>
-          <ol class="theory-list" style="margin-bottom: 0;">
-            <li>Mở trình duyệt web, nhấn <b>F12</b> (hoặc chuột phải chọn <i>Inspect</i>).</li>
-            <li>Chuyển qua tab <b>Network</b> $\rightarrow$ chọn bộ lọc <b>WS</b> (WebSocket).</li>
-            <li>Nhấn vào kết nối đang chạy tên là <code class="inline-code">mqtt</code> hoặc kết nối đến cổng <code class="inline-code">8884</code>.</li>
-            <li>Chọn tab phụ <b>Messages</b>: Sinh viên sẽ nhìn thấy rõ mồn một từng gói tin <code class="inline-code">Send</code> và <code class="inline-code">Receive</code> chứa tọa độ JSON của nét vẽ truyền qua lại với MQTT Broker theo thời gian thực!</li>
-          </ol>
         </div>
       </div>
     </div>
@@ -467,17 +473,18 @@
           ctx.fillStyle = '#a855f7'; ctx.beginPath(); ctx.arc(p2X, 185, 8, 0, Math.PI * 2); ctx.fill();
         }
 
-        document.getElementById('mqttAnimText').textContent = "Mô phỏng MQTT Pub/Sub: Publisher gửi tin lên Broker $\rightarrow$ Broker phân phối xuống các Subscribers.";
+        document.getElementById('mqttAnimText').textContent = "Mô phỏng MQTT Pub/Sub: Publisher gửi tin lên Broker -> Broker phân phối xuống các Subscribers.";
         mqttAnimId = requestAnimationFrame(draw);
       }
       draw();
     }
 
-    // --- TAB 3: WHITEBOARD & TOUCH FIX ---
+    // --- TAB 3: WHITEBOARD, TEXT & CHAT BROADCAST ---
     const canvas = document.getElementById('whiteboard');
     const ctx = canvas.getContext('2d');
     let painting = false;
     let currentColor = '#0f172a';
+    let currentMode = 'draw'; // 'draw' hoặc 'text'
     let lastX = 0, lastY = 0;
 
     const myId = 'Client_' + Math.floor(Math.random() * 9000 + 1000);
@@ -485,6 +492,7 @@
 
     const topicName = "netprog/class/whiteboard/room_master";
     const presenceTopic = "netprog/class/whiteboard/presence";
+    const chatTopic = "netprog/class/whiteboard/chat"; // Topic nhắn tin mới
 
     const activeClients = new Map();
     activeClients.set(myId, { id: myId, status: 'Đang hoạt động', lastSeen: Date.now() });
@@ -497,6 +505,26 @@
       line.innerHTML = `[${time}] ${msg}`;
       logs.appendChild(line);
       logs.scrollTop = logs.scrollHeight;
+    }
+
+    function appendChat(sender, text) {
+      const chatLogs = document.getElementById('chatLogs');
+      const msgDiv = document.createElement('div');
+      msgDiv.className = 'chat-msg';
+      msgDiv.innerHTML = `<b>${sender}:</b> ${text}`;
+      chatLogs.appendChild(msgDiv);
+      chatLogs.scrollTop = chatLogs.scrollHeight;
+    }
+
+    function sendChat() {
+      const input = document.getElementById('chatInput');
+      const text = input.value.trim();
+      if (text && client.connected) {
+        const payload = JSON.stringify({ sender: myId, text: text });
+        client.publish(chatTopic, payload);
+        input.value = '';
+        logNet('Đã Broadcast tin nhắn chat.');
+      }
     }
 
     function updateClientListUI() {
@@ -522,8 +550,8 @@
       document.getElementById('connStatus').textContent = 'Đã kết nối';
       document.getElementById('connStatus').className = 'badge badge-green';
 
-      client.subscribe([topicName, presenceTopic], (err) => {
-        if (!err) logNet(`Đã Subscribe vào các Topic chính.`);
+      client.subscribe([topicName, presenceTopic, chatTopic], (err) => {
+        if (!err) logNet(`Đã Subscribe vào các Topic chính & Chat.`);
       });
 
       setInterval(() => {
@@ -540,12 +568,17 @@
             activeClients.set(data.id, { id: data.id, status: 'Trực tuyến', lastSeen: Date.now() });
             updateClientListUI();
           }
+        } else if (topic === chatTopic) {
+          appendChat(data.sender, data.text);
         } else if (topic === topicName) {
           if (data.sender === myId) return;
 
           if (data.type === 'draw') {
             drawLine(data.x1, data.y1, data.x2, data.y2, data.color, data.size);
             logNet(`[${data.sender}] Vẽ nét x(${Math.round(data.x1)}->${Math.round(data.x2)})`);
+          } else if (data.type === 'text') {
+            drawTextOnCanvas(data.text, data.x, data.y, data.color, data.size);
+            logNet(`[${data.sender}] Broadcast từ khóa lên bảng.`);
           } else if (data.type === 'clear') {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             logNet(`[${data.sender}] Xóa sạch bảng`);
@@ -555,6 +588,13 @@
         console.error(e);
       }
     });
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.getElementById('btnDraw').className = mode === 'draw' ? 'btn' : 'btn btn-inactive';
+      document.getElementById('btnText').className = mode === 'text' ? 'btn' : 'btn btn-inactive';
+      canvas.style.cursor = mode === 'draw' ? 'crosshair' : 'text';
+    }
 
     function getCursorPos(e) {
       const rect = canvas.getBoundingClientRect();
@@ -574,14 +614,31 @@
 
     function startPosition(e) {
       e.preventDefault();
-      painting = true;
       const pos = getCursorPos(e);
+      
+      if (currentMode === 'text') {
+        const text = prompt("Nhập từ khóa muốn Broadcast lên bảng:");
+        if (text && text.trim() !== '') {
+          const size = document.getElementById('brushSize').value * 4; // Tỉ lệ chữ to hơn nét cọ
+          drawTextOnCanvas(text, pos.x, pos.y, currentColor, size);
+          
+          if (client.connected) {
+            client.publish(topicName, JSON.stringify({
+              sender: myId, type: 'text', text: text,
+              x: pos.x, y: pos.y, color: currentColor, size: size
+            }));
+          }
+        }
+        return;
+      }
+
+      painting = true;
       lastX = pos.x;
       lastY = pos.y;
     }
 
     function drawPosition(e) {
-      if (!painting) return;
+      if (!painting || currentMode !== 'draw') return;
       e.preventDefault();
       const pos = getCursorPos(e);
       const currentX = pos.x;
@@ -629,6 +686,12 @@
       ctx.lineCap = 'round';
       ctx.stroke();
       ctx.closePath();
+    }
+
+    function drawTextOnCanvas(text, x, y, color, size) {
+      ctx.font = `bold ${size}px 'Segoe UI', sans-serif`;
+      ctx.fillStyle = color;
+      ctx.fillText(text, x, y);
     }
 
     function setColor(color, element) {
