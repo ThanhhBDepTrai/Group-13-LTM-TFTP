@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tftp-pro"
+version = "1.0.0"
+description = "A small, reliable TFTP client/server (RFC 1350) with optional blksize/timeout/tsize."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Group 13", email = "group13@example.com" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.4"]
+
+[project.scripts]
+tftp-server = "tftp_server:main"
+tftp-client = "tftp_client:main"
+tftp-gui = "tftp_gui:main"
+
+[tool.setuptools]
+py-modules = ["tftp_packet", "tftp_server", "tftp_client", "tftp_gui"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

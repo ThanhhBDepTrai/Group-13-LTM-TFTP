@@ -1,0 +1,17 @@
+name: Bug report
+description: Something is broken
+labels: ["bug"]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+  - type: input
+    attributes:
+      label: Version / commit
+  - type: dropdown
+    attributes:
+      label: OS
+      options: [Windows, Linux, macOS]
