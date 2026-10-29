@@ -88,6 +88,8 @@ class TFTPClient:
                         raw, peer = sock.recvfrom(MAX_PACKET_SIZE)
                         break
                     except TimeoutError:
+                        if cancel is not None and getattr(cancel, "is_set", lambda: False)():
+                            raise TFTPErrorClient("Cancelled")
                         self._log(f"Timeout waiting DATA, retry {attempt}")
                         if expected_block > 1:
                             sock.sendto(pack_ack(expected_block - 1), server_tid or (self.host, self.port))
@@ -181,6 +183,8 @@ class TFTPClient:
                     raw, peer = sock.recvfrom(MAX_PACKET_SIZE)
                     break
                 except TimeoutError:
+                    if cancel is not None and getattr(cancel, "is_set", lambda: False)():
+                        raise TFTPErrorClient("Cancelled")
                     self._log(f"Timeout waiting ACK0, retry {attempt}")
                     sock.sendto(pack_wrq(remote, options=options), (self.host, self.port))
             else:
@@ -213,6 +217,8 @@ class TFTPClient:
                             raw, peer = sock.recvfrom(MAX_PACKET_SIZE)
                             break
                         except TimeoutError:
+                            if cancel is not None and getattr(cancel, "is_set", lambda: False)():
+                                raise TFTPErrorClient("Cancelled")
                             self._log(f"Timeout waiting ACK block {block}, retry {attempt}")
                     else:
                         raise TimeoutError(f"No ACK for block {block}")

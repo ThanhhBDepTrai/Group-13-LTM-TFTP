@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "A small, reliable TFTP client/server (RFC 1350) with optional blksize/timeout/tsize."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Group 13", email = "group13@example.com" }]
 dependencies = []
 

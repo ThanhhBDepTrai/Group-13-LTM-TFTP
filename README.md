@@ -2,7 +2,9 @@
 
 A small, reliable TFTP client/server with GUI, implementing RFC 1350 and optional blksize/timeout/tsize (RFC 2347-2349).
 
-## Features
+Một client/server TFTP nhỏ gọn, tin cậy, có GUI, cài đặt RFC 1350 và option blksize/timeout/tsize (RFC 2347-2349).
+
+## Features / Tính năng
 - RFC 1350: RRQ, WRQ, DATA, ACK, ERROR
 - Multi-client server, ephemeral TID, stop-and-wait retry
 - GUI with progress, cancel and packet log
@@ -10,7 +12,7 @@ A small, reliable TFTP client/server with GUI, implementing RFC 1350 and optiona
 - Optional blksize/timeout/tsize
 - Atomic transfer, path traversal protection
 
-## Quick start (from source)
+## Quick start (from source) / Chạy từ mã nguồn
 ```bash
 git clone https://github.com/<owner>/tftp-pro.git
 cd tftp-pro
@@ -28,7 +30,7 @@ python tftp_client.py --host 127.0.0.1 --port 6969 put ./README.md README.md
 python tftp_client.py --host 127.0.0.1 --port 6969 get README.md ./README.downloaded.md
 ```
 
-## Server options
+## Server options / Tùy chọn server
 | Option | Default | Description |
 |---|---|---|
 | `--host` | 0.0.0.0 | Bind address |
@@ -39,8 +41,10 @@ python tftp_client.py --host 127.0.0.1 --port 6969 get README.md ./README.downlo
 | `--max-clients` | 20 | Concurrent sessions |
 | `--overwrite` | off | Allow overwrite |
 
-## Security
+## Security / Bảo mật
 TFTP has no encryption or authentication. Use only in a trusted LAN. Do not expose to the public Internet.
+
+TFTP không có mã hóa/xác thực. Chỉ dùng trong LAN tin cậy, không mở ra Internet.
 
 ## License
 MIT
