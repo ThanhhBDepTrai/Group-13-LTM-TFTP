@@ -346,10 +346,12 @@ def main(argv=None) -> int:
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
 
-    logger.basicConfig(
-        level=getattr(logging, args.log_level.upper(), logger.INFO),
-        format="%(asctime)s %(levelname)s %(message)s",
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s"
     )
+
+    logger = logging.getLogger(__name__)
 
     config = ServerConfig(
         host=args.host,
