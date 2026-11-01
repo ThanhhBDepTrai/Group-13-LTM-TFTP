@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
+import json
 import os
 import socket
 from collections.abc import Callable
@@ -44,10 +44,41 @@ class TFTPClient:
         self.timeout = timeout
         self.retries = retries
         self.blksize = blksize
-        self.on_log = on_log or (lambda m: None)
+        self.on_log = on_log or (lambda message: None)
 
     def _log(self, msg: str) -> None:
         self.on_log(msg)
+
+    def list_files(self) -> list[str]:
+        """Get the current file list from the server over TCP port + 1."""
+        list_port = self.port + 1
+
+        with socket.create_connection(
+            (self.host, list_port), timeout=self.timeout
+        ) as sock:
+            sock.settimeout(self.timeout)
+            sock.sendall(b'{"action":"list"}\n')
+
+            data = bytearray()
+            while b"\n" not in data and len(data) < 1024 * 1024:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data.extend(chunk)
+
+        if not data:
+            raise TFTPErrorClient("Server không trả về danh sách file")
+
+        response = json.loads(bytes(data).split(b"\n", 1)[0].decode("utf-8"))
+
+        if "error" in response:
+            raise TFTPErrorClient(response["error"])
+
+        files = response.get("files")
+        if not isinstance(files, list):
+            raise TFTPErrorClient("Dữ liệu danh sách file không hợp lệ")
+
+        return [str(name) for name in files]
 
     def download(
         self,
@@ -65,6 +96,7 @@ class TFTPClient:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind(("", 0))
         sock.settimeout(self.timeout)
+
         server_tid = None
         total_size = None
         expected_block = 1
@@ -81,22 +113,34 @@ class TFTPClient:
         try:
             if on_progress:
                 on_progress(0, None)
+
             sock.sendto(pack_rrq(remote, options=options), (self.host, self.port))
+
             while True:
                 if cancel is not None and getattr(cancel, "is_set", lambda: False)():
                     raise TFTPErrorClient("Cancelled")
+
                 for attempt in range(1, self.retries + 1):
                     try:
                         raw, peer = sock.recvfrom(MAX_PACKET_SIZE)
                         break
                     except TimeoutError:
-                        if cancel is not None and getattr(cancel, "is_set", lambda: False)():
+                        if cancel is not None and getattr(
+                            cancel, "is_set", lambda: False
+                        )():
                             raise TFTPErrorClient("Cancelled")
+
                         self._log(f"Timeout waiting DATA, retry {attempt}")
                         if expected_block > 1:
-                            sock.sendto(pack_ack(expected_block - 1), server_tid or (self.host, self.port))
+                            sock.sendto(
+                                pack_ack(expected_block - 1),
+                                server_tid or (self.host, self.port),
+                            )
                         else:
-                            sock.sendto(pack_rrq(remote, options=options), (self.host, self.port))
+                            sock.sendto(
+                                pack_rrq(remote, options=options),
+                                (self.host, self.port),
+                            )
                 else:
                     raise TimeoutError("No response from server")
 
@@ -108,11 +152,14 @@ class TFTPClient:
 
                 try:
                     pkt = unpack_packet(raw)
-                except TFTPError as e:
-                    raise TFTPErrorClient(str(e))
+                except TFTPError as exc:
+                    raise TFTPErrorClient(str(exc))
 
                 if pkt.opcode == OP_ERROR:
-                    raise TFTPErrorClient(f"Server error {pkt.error_code}: {pkt.error_msg}")
+                    raise TFTPErrorClient(
+                        f"Server error {pkt.error_code}: {pkt.error_msg}"
+                    )
+
                 if pkt.opcode == OP_OACK:
                     if "blksize" in pkt.options:
                         blksize = int(pkt.options["blksize"])
@@ -124,27 +171,35 @@ class TFTPClient:
                             total_size = int(pkt.options["tsize"])
                         except ValueError:
                             total_size = None
+
                     sock.sendto(pack_ack(0), server_tid)
                     if on_progress:
                         on_progress(received, total_size)
                     continue
+
                 if pkt.opcode != OP_DATA:
                     continue
 
                 if pkt.block == expected_block:
-                    with open(tmp, "ab") as f:
-                        f.write(pkt.data)
+                    with open(tmp, "ab") as file:
+                        file.write(pkt.data)
+
                     received += len(pkt.data)
                     sock.sendto(pack_ack(expected_block), server_tid)
+
                     if on_progress:
                         on_progress(received, total_size)
+
                     if len(pkt.data) < blksize:
                         os.replace(tmp, local)
                         self._log(f"Downloaded {received} bytes")
                         return received
+
                     expected_block = (expected_block + 1) & 0xFFFF
+
                 elif pkt.block < expected_block:
                     sock.sendto(pack_ack(pkt.block), server_tid)
+
         finally:
             sock.close()
             if cancel is not None and getattr(cancel, "is_set", lambda: False)():
@@ -163,11 +218,12 @@ class TFTPClient:
         local = Path(local)
         if remote is None:
             remote = local.name
-        size = local.stat().st_size
 
+        size = local.stat().st_size
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind(("", 0))
         sock.settimeout(self.timeout)
+
         server_tid = None
         blksize = self.blksize
         timeout = self.timeout
@@ -183,14 +239,19 @@ class TFTPClient:
         try:
             if on_progress:
                 on_progress(0, size)
+
             sock.sendto(pack_wrq(remote, options=options), (self.host, self.port))
+
             for attempt in range(1, self.retries + 1):
                 try:
                     raw, peer = sock.recvfrom(MAX_PACKET_SIZE)
                     break
                 except TimeoutError:
-                    if cancel is not None and getattr(cancel, "is_set", lambda: False)():
+                    if cancel is not None and getattr(
+                        cancel, "is_set", lambda: False
+                    )():
                         raise TFTPErrorClient("Cancelled")
+
                     self._log(f"Timeout waiting ACK0, retry {attempt}")
                     sock.sendto(pack_wrq(remote, options=options), (self.host, self.port))
             else:
@@ -198,8 +259,12 @@ class TFTPClient:
 
             server_tid = peer
             pkt = unpack_packet(raw)
+
             if pkt.opcode == OP_ERROR:
-                raise TFTPErrorClient(f"Server error {pkt.error_code}: {pkt.error_msg}")
+                raise TFTPErrorClient(
+                    f"Server error {pkt.error_code}: {pkt.error_msg}"
+                )
+
             if pkt.opcode == OP_OACK:
                 if "blksize" in pkt.options:
                     blksize = int(pkt.options["blksize"])
@@ -212,37 +277,55 @@ class TFTPClient:
             else:
                 raise TFTPErrorClient("Unexpected response to WRQ")
 
-            with open(local, "rb") as f:
+            with open(local, "rb") as file:
                 while True:
-                    if cancel is not None and getattr(cancel, "is_set", lambda: False)():
+                    if cancel is not None and getattr(
+                        cancel, "is_set", lambda: False
+                    )():
                         raise TFTPErrorClient("Cancelled")
-                    chunk = f.read(blksize)
+
+                    chunk = file.read(blksize)
+
                     for attempt in range(1, self.retries + 1):
                         sock.sendto(pack_data(block, chunk), server_tid)
+
                         try:
                             raw, peer = sock.recvfrom(MAX_PACKET_SIZE)
-                            break
                         except TimeoutError:
-                            if cancel is not None and getattr(cancel, "is_set", lambda: False)():
+                            if cancel is not None and getattr(
+                                cancel, "is_set", lambda: False
+                            )():
                                 raise TFTPErrorClient("Cancelled")
-                            self._log(f"Timeout waiting ACK block {block}, retry {attempt}")
+
+                            self._log(
+                                f"Timeout waiting ACK block {block}, retry {attempt}"
+                            )
+                            continue
+
+                        if peer != server_tid:
+                            sock.sendto(pack_error(5, "Unknown TID"), peer)
+                            continue
+
+                        ack = unpack_packet(raw)
+                        if ack.opcode == OP_ERROR:
+                            raise TFTPErrorClient(
+                                f"Server error {ack.error_code}: {ack.error_msg}"
+                            )
+
+                        if ack.opcode == OP_ACK and ack.block == block:
+                            sent += len(chunk)
+                            if on_progress:
+                                on_progress(sent, size)
+
+                            if len(chunk) < blksize:
+                                self._log(f"Uploaded {sent} bytes")
+                                return sent
+
+                            block = (block + 1) & 0xFFFF
+                            break
                     else:
                         raise TimeoutError(f"No ACK for block {block}")
-                    if peer != server_tid:
-                        sock.sendto(pack_error(5, "Unknown TID"), peer)
-                        continue
-                    ack = unpack_packet(raw)
-                    if ack.opcode == OP_ERROR:
-                        raise TFTPErrorClient(f"Server error {ack.error_code}: {ack.error_msg}")
-                    if ack.opcode == OP_ACK and ack.block == block:
-                        sent += len(chunk)
-                        if on_progress:
-                            on_progress(sent, size)
-                        if len(chunk) < blksize:
-                            self._log(f"Uploaded {sent} bytes")
-                            return sent
-                        block = (block + 1) & 0xFFFF
-                        break
+
         finally:
             sock.close()
 
@@ -251,25 +334,31 @@ class TFTPClient:
 
 
 def main(argv=None) -> int:
+    import argparse
+
     parser = argparse.ArgumentParser(prog="tftp-client")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=69)
+
     sub = parser.add_subparsers(dest="cmd", required=True)
     get = sub.add_parser("get")
     get.add_argument("remote")
     get.add_argument("local")
+
     put = sub.add_parser("put")
     put.add_argument("local")
     put.add_argument("remote", nargs="?")
-    args = parser.parse_args(argv)
 
+    args = parser.parse_args(argv)
     client = TFTPClient(args.host, args.port, on_log=print)
+
     if args.cmd == "get":
-        n = client.download(args.remote, args.local)
-        print(f"Downloaded {n} bytes to {args.local}")
+        count = client.download(args.remote, args.local)
+        print(f"Downloaded {count} bytes to {args.local}")
     else:
-        n = client.upload(args.local, args.remote)
-        print(f"Uploaded {n} bytes")
+        count = client.upload(args.local, args.remote)
+        print(f"Uploaded {count} bytes")
+
     return 0
 
 
