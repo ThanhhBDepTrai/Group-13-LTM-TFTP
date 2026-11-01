@@ -79,8 +79,6 @@ class TFTPClient:
         options["tsize"] = "0"
 
         try:
-            if on_progress:
-                on_progress(0, None)
             sock.sendto(pack_rrq(remote, options=options), (self.host, self.port))
             while True:
                 if cancel is not None and getattr(cancel, "is_set", lambda: False)():
@@ -125,8 +123,6 @@ class TFTPClient:
                         except ValueError:
                             total_size = None
                     sock.sendto(pack_ack(0), server_tid)
-                    if on_progress:
-                        on_progress(received, total_size)
                     continue
                 if pkt.opcode != OP_DATA:
                     continue
@@ -181,8 +177,6 @@ class TFTPClient:
         options["tsize"] = str(size)
 
         try:
-            if on_progress:
-                on_progress(0, size)
             sock.sendto(pack_wrq(remote, options=options), (self.host, self.port))
             for attempt in range(1, self.retries + 1):
                 try:
