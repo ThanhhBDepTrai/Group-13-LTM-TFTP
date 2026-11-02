@@ -111,7 +111,7 @@ class TFTPServer:
         try:
             path = self.safe_path(pkt.filename)
         except TFTPError as e:
-            self._send_error(data_sock, client_addr, e.error_code, e.error_msg)
+            self._send_error(data_sock, client_addr, e.code, e.message)
             return
         if not path.is_file():
             self._send_error(data_sock, client_addr, 1, "File not found")
@@ -125,7 +125,7 @@ class TFTPServer:
             if pkt.options:
                 accepted = negotiate_options(pkt.options, file_size=path.stat().st_size)
         except TFTPError as e:
-            self._send_error(data_sock, client_addr, e.error_code, e.error_msg)
+            self._send_error(data_sock, client_addr, e.code, e.message)
             return
 
         if "blksize" in accepted:
@@ -178,7 +178,7 @@ class TFTPServer:
         try:
             path = self.safe_path(pkt.filename)
         except TFTPError as e:
-            self._send_error(data_sock, client_addr, e.error_code, e.error_msg)
+            self._send_error(data_sock, client_addr, e.code, e.message)
             return
         if path.exists() and not self.config.overwrite:
             self._send_error(data_sock, client_addr, 6, "File already exists")
@@ -192,7 +192,7 @@ class TFTPServer:
             if pkt.options:
                 accepted = negotiate_options(pkt.options, file_size=None)
         except TFTPError as e:
-            self._send_error(data_sock, client_addr, e.error_code, e.error_msg)
+            self._send_error(data_sock, client_addr, e.code, e.message)
             return
 
         if "blksize" in accepted:
@@ -316,7 +316,7 @@ class TFTPServer:
             try:
                 pkt = unpack_packet(data)
             except TFTPError as e:
-                self._send_error(self.sock, addr, e.error_code, e.error_msg)
+                self._send_error(self.sock, addr, e.code, e.message)
                 continue
             if pkt.opcode not in (OP_RRQ, OP_WRQ):
                 self._send_error(self.sock, addr, 4, "Illegal operation")
