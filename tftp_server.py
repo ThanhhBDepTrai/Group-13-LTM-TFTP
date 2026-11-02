@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ class TFTPServer:
         self._sem = threading.Semaphore(config.max_clients)
         self._stop = threading.Event()
         self.sock: socket.socket | None = None
+        self._list_sock: socket.socket | None = None
 
     # ---------- path safety ----------
     def safe_path(self, filename: str) -> Path:
@@ -301,8 +303,68 @@ class TFTPServer:
             finally:
                 data_sock.close()
 
+    def _tcp_listing_loop(self) -> None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        bind_host = "" if self.config.host in ("0.0.0.0", "") else self.config.host
+        try:
+            sock.bind((bind_host, self.config.port + 1))
+        except OSError as e:
+            logger.warning("Cannot bind listing port %d: %s", self.config.port + 1, e)
+            return
+        sock.listen(8)
+        self._list_sock = sock
+        logger.info("TFTP listing service listening on %s:%d", bind_host or "0.0.0.0", self.config.port + 1)
+        while not self._stop.is_set():
+            try:
+                sock.settimeout(1.0)
+                conn, _addr = sock.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+            threading.Thread(target=self._handle_listing_conn, args=(conn,), daemon=True).start()
+
+    def _handle_listing_conn(self, conn: socket.socket) -> None:
+        try:
+            conn.settimeout(self.config.timeout)
+            data = bytearray()
+            while b"\n" not in data and len(data) < 1024 * 1024:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                data.extend(chunk)
+            request: dict = {}
+            if data:
+                try:
+                    request = json.loads(bytes(data).split(b"\n", 1)[0].decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    request = {}
+            if request.get("action") != "list":
+                response = {"error": "Unknown action"}
+            else:
+                try:
+                    files = sorted(p.name for p in self.root.iterdir() if p.is_file())
+                except OSError as e:
+                    response = {"error": str(e)}
+                else:
+                    response = {"files": files}
+            conn.sendall((json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8"))
+        except Exception as e:  # noqa: BLE001
+            try:
+                conn.sendall((json.dumps({"error": str(e)}) + "\n").encode("utf-8"))
+            except OSError:
+                pass
+        finally:
+            try:
+                conn.close()
+            except OSError:
+                pass
+
     def serve_forever(self) -> None:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._list_sock = None
+        threading.Thread(target=self._tcp_listing_loop, daemon=True).start()
         self.sock.bind((self.config.host, self.config.port))
         logger.info("TFTP server listening on %s:%d, root=%s", self.config.host, self.config.port, self.root)
         while not self._stop.is_set():
@@ -331,6 +393,12 @@ class TFTPServer:
                 self.sock.close()
             except OSError:
                 pass
+        list_sock = getattr(self, "_list_sock", None)
+        if list_sock:
+            try:
+                list_sock.close()
+            except OSError:
+                pass
 
 
 def main(argv=None) -> int:
@@ -347,7 +415,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(
-        level=getattr(logging, args.log_level.upper()),
+        level=getattr(logging, args.log_level.upper(), logging.INFO),
         format="%(asctime)s [%(levelname)s] %(message)s"
     )
 
