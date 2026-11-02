@@ -454,8 +454,8 @@ def test_validate_tsize_invalid_raises_code_8(value):
 
 
 def test_validate_options_ignores_unknown_and_normalizes():
-    out = validate_options({"BLKSIZE": "0512", "windowsize": "4"})
-    assert out == {"blksize": "512"}
+    out = validate_options({"BLKSIZE": "0512", "foobar": "4", "windowsize": "4"})
+    assert out == {"blksize": "512", "windowsize": "4"}
 
 
 def test_validate_options_empty_returns_empty():

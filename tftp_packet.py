@@ -314,8 +314,9 @@ def validate_options(options: Mapping[str, str]) -> dict[str, str]:
     * ``blksize``: 8..65464 (RFC 2348)
     * ``timeout``: 1..255 giây (RFC 2349)
     * ``tsize``: số nguyên >= 0 (RFC 2349)
+    * ``windowsize``: 1..65535 block (RFC 7440)
 
-    Option không nhận diện (ví dụ ``windowsize``) bị bỏ qua - đúng RFC 2347:
+    Option không nhận diện (ví dụ ``foo``) bị bỏ qua - đúng RFC 2347:
     bên nhận được phép lờ đi option lạ. Giá trị sai ném ``TFTPError(8)``.
     """
     accepted: dict[str, str] = {}
@@ -327,4 +328,6 @@ def validate_options(options: Mapping[str, str]) -> dict[str, str]:
             accepted[name] = str(_parse_int(name, value, MIN_TIMEOUT, MAX_TIMEOUT))
         elif name == "tsize":
             accepted[name] = str(_parse_int(name, value, 0, None))
+        elif name == "windowsize":
+            accepted[name] = str(_parse_int(name, value, 1, 65535))
     return accepted

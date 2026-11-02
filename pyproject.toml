@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tftp-pro"
-version = "1.0.0"
-description = "A small, reliable TFTP client/server (RFC 1350) with optional blksize/timeout/tsize."
+version = "1.1.0"
+description = "TFTP Pro: TFTP client/server with RFC 7440, Admin API, SHA-256, monitoring and PXE profiles."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -19,9 +19,27 @@ dev = ["pytest>=7.0", "ruff>=0.4"]
 tftp-server = "tftp_server:main"
 tftp-client = "tftp_client:main"
 tftp-gui = "tftp_gui:main"
+tftp-pro = "tftp_pro:main"
+tftp-admin-api = "admin_api:main"
 
 [tool.setuptools]
-py-modules = ["tftp_packet", "tftp_server", "tftp_client", "tftp_gui"]
+py-modules = [
+    "admin_api",
+    "admin_client",
+    "auth",
+    "metrics",
+    "packet_analyzer",
+    "packet_trace",
+    "pxe_config",
+    "storage_manager",
+    "tftp_client",
+    "tftp_config",
+    "tftp_gui",
+    "tftp_options",
+    "tftp_packet",
+    "tftp_pro",
+    "tftp_server",
+]
 
 [tool.ruff]
 line-length = 100

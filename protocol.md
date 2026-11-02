@@ -1,7 +1,8 @@
 # Ghi chú giao thức TFTP & API `tftp_packet.py`
 
 Tài liệu này mô tả định dạng gói tin, mã lỗi, option và API công khai của
-`tftp_packet.py` (Thành viên 1). Tham chiếu: RFC 1350, 2347, 2348, 2349.
+`tftp_packet.py` (Thành viên 1). Tham chiếu: RFC 1350, 2347, 2348, 2349,
+7440.
 
 ## 1. Định dạng gói tin
 
@@ -32,7 +33,7 @@ Quy ước của TFTP Pro:
 - Tên file mã hóa **UTF-8** (TFTP gốc dùng ASCII nên client khác có thể không hiểu tên tiếng Việt).
 - Mode khi **gửi** luôn là `octet`. Khi **nhận**, parser chấp nhận `netascii`/`octet`/`mail`
   (không phân biệt hoa thường) và từ chối mode khác bằng lỗi 4; việc có hỗ trợ `netascii`
-  hay không do server/client quyết định (v1.0.0: không).
+  hay không do server/client quyết định (v1.1.0: không).
 - Tên option không phân biệt hoa thường; luôn được chuẩn hóa về chữ thường.
 - Block number 16-bit: 0…65535. File kết thúc khi gói DATA có độ dài **< blksize** (kể cả 0 byte),
   nên file có kích thước đúng bội số blksize phải gửi thêm một DATA rỗng.
@@ -54,17 +55,21 @@ Quy ước của TFTP Pro:
 `unpack_packet()` **chỉ ném `TFTPError`** với mọi đầu vào `bytes` (đã được fuzz 3000 gói ngẫu nhiên
 trong test), nên server có thể `try/except TFTPError` rồi gửi `pack_error(exc.code, exc.message)`.
 
-## 3. Option mở rộng (RFC 2347 / 2348 / 2349)
+## 3. Option mở rộng (RFC 2347 / 2348 / 2349 / 7440)
 
-| Option   | RFC  | Giá trị hợp lệ        | Mặc định | Ghi chú                                                   |
-|----------|------|-----------------------|----------|-----------------------------------------------------------|
-| blksize  | 2348 | 8 … 65464             | 512      | 1460 an toàn với MTU Ethernet; 8192 có thể bị phân mảnh IP |
-| timeout  | 2349 | 1 … 255 (giây)        | 3        | thời gian chờ trước khi gửi lại                           |
-| tsize    | 2349 | số nguyên ≥ 0         | —        | RRQ gửi `0`; server trả kích thước thật trong OACK        |
+| Option     | RFC  | Giá trị hợp lệ        | Mặc định | Ghi chú                                                   |
+|------------|------|-----------------------|----------|-----------------------------------------------------------|
+| blksize    | 2348 | 8 … 65464             | 512      | 1460 an toàn với MTU Ethernet; 8192 có thể bị phân mảnh IP |
+| timeout    | 2349 | 1 … 255 (giây)        | 3        | thời gian chờ trước khi gửi lại                           |
+| tsize      | 2349 | số nguyên ≥ 0         | —        | RRQ gửi `0`; server trả kích thước thật trong OACK        |
+| windowsize | 7440 | 1 … 65535             | 1        | Số block/cửa sổ; server trả `<=` giá trị client yêu cầu   |
 
 Luồng: client thêm option vào RRQ/WRQ → server trả **OACK** với các option chấp nhận →
-client gửi **ACK #0** → truyền với `blksize` đã thống nhất. Nếu server không hiểu option,
-nó bỏ qua và trả DATA #1 (RRQ) hoặc ACK #0 (WRQ); client phải xử lý cả hai trường hợp.
+client gửi **ACK #0** → truyền với `blksize`/`windowsize` đã thống nhất. Nếu server không
+hiểu option, nó bỏ qua và trả DATA #1 (RRQ) hoặc ACK #0 (WRQ); client phải xử lý cả hai
+trường hợp. `windowsize` trong OACK luôn `<=` giá trị client yêu cầu và `<=` giới hạn
+của server (mặc định 16). Nếu không có `windowsize` trong OACK, hai bên dùng `1`
+(tương thích RFC 1350). `windowsize = 1` tương đương stop-and-wait.
 
 `validate_options(options)` kiểm tra giá trị của ba option trên, trả về dict đã chuẩn hóa
 (`"0512"` → `"512"`), **bỏ qua** option lạ (đúng RFC 2347) và ném `TFTPError(8)` khi giá trị sai.
@@ -91,7 +96,9 @@ pack_ack(block)                  -> bytes
 pack_error(code, message=None)   -> bytes
 pack_oack(options)               -> bytes
 unpack_packet(raw)               -> Packet
-validate_options(options)        -> dict[str, str]     # bổ sung cho W3.1
+validate_options(options)        -> dict[str, str]     # kiểm tra blksize/timeout/tsize
+negotiate_options(requested, ...) -> dict[str, str]   # tftp_options.py, thêm windowsize
+TransferOptions.from_oack(...)   -> TransferOptions    # giá trị hiệu lực sau OACK/fallback
 ```
 
 Phần bổ sung so với `docs/interface.md` (cần TV2/TV3 đồng ý khi tạo PR):
@@ -176,6 +183,21 @@ Quy tắc: **file kết thúc khi gói DATA có độ dài < blksize** (kể c�
 Hệ quả cho TV2/TV3: dùng điều kiện dừng `len(chunk) < blksize` và **luôn gửi DATA cuối**
 dù nó rỗng. Nếu bỏ qua gói rỗng, bên nhận sẽ chờ mãi file có kích thước đúng bội số blksize.
 `tftp_packet.py` đã được kiểm thử với DATA 0 / 1 / 511 / 512 / 513 / 1460 / 65464 byte.
+
+### 5.6. Window Size (RFC 7440)
+
+- `windowsize` chỉ là option trong RRQ/WRQ/OACK, không tạo opcode mới.
+- Bên gửi phát tối đa `windowsize` DATA block trước khi chờ ACK của block cuối
+  cửa sổ. ACK trong RFC 7440 là **ACK tích lũy**: ACK #n xác nhận toàn bộ các
+  block đến n trong cửa sổ.
+- Bên nhận chỉ ACK sau khi đã nhận đủ cửa sổ hoặc gặp block cuối file. Nếu nhận
+  block thiếu trong cửa sổ, bên nhận không ACK block cuối; bên gửi timeout và
+  truyền lại từ block đầu tiên chưa được ACK.
+- Bên nhận bỏ qua block trùng/cũ và re-ACK `last_ack`; không ghi lặp dữ liệu.
+- Timeout áp dụng cho cả cửa sổ; số lần retry có giới hạn (`--retries`).
+- Nếu server không hỗ trợ hoặc từ chối option, fallback `windowsize = 1`.
+- Block number vẫn tăng theo `(block + 1) & 0xFFFF`; cửa sổ không làm thay đổi
+  quy tắc kết thúc file (`len(chunk) < blksize`).
 
 ## 6. Chạy test
 

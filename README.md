@@ -1,147 +1,252 @@
-# HƯỚNG DẪN CÀI ĐẶT VÀ CHẠY TFTP PRO
+# TFTP Pro 1.1.0
 
-## 1. Yêu cầu môi trường
+TFTP Pro là ứng dụng Python gồm TFTP Client/Server, giao diện Tkinter, Admin API
+quản trị riêng và công cụ hỗ trợ PXE trong mạng lab. Phiên bản này giữ tương
+thích CLI/GUI cũ, đồng thời bổ sung RFC 7440, quản lý file/người dùng, SHA-256,
+dashboard, packet analyzer và boot profile PXE.
 
-- Hệ điều hành: Windows.
-- Đã cài đặt Python 3.
+> TFTP không có xác thực/mã hóa tích hợp. Không mở TFTP hoặc Admin API ra
+> Internet. Admin API mặc định chỉ bind `127.0.0.1`; chỉ mở trong LAN tin cậy
+> khi thực sự cần và luôn dùng mật khẩu mạnh.
 
-## 2. Khởi động TFTP Server
+## 1. Tính năng
 
-**Bước 1:** Mở Terminal hoặc PowerShell tại thư mục chứa mã nguồn dự án.
+- RFC 1350: RRQ, WRQ, DATA, ACK, ERROR; nhiều client, TID riêng, retry có giới hạn.
+- RFC 2347/2348/2349: `blksize`, `timeout`, `tsize`.
+- RFC 7440: `windowsize`, ACK tích lũy theo cửa sổ; tự fallback về `1`.
+- Mặc định an toàn: client `windowsize = 1`, server chấp nhận tối đa `16`.
+- Ghi file nguyên tử và kiểm tra path traversal/symlink qua `StorageManager`.
+- Admin API HTTP tách khỏi TFTP, token Bearer, phân quyền `admin/user/guest`.
+- File Manager: list, search, metadata, upload, download, rename, mkdir, delete.
+- SHA-256: hash file, upload/download có đối chiếu `VERIFIED` / `MISMATCH`.
+- Dashboard metrics và Packet Analyzer từ trace nội bộ của Client/Server.
+- PXE profile BIOS/UEFI, kiểm tra boot file; **không** chạy DHCP server.
+- GUI sáu tab: Truyền file, File Manager, Dashboard, Packet Analyzer, Người dùng, PXE.
 
-**Bước 2:** Chạy lệnh:
+## 2. Yêu cầu
 
-```bash
-python tftp_server.py
+- Windows (GUI đã được kiểm tra trên Windows), Python 3.10 trở lên.
+- Không cần thư viện bên thứ ba để chạy ứng dụng.
+- Kiểm thử/dev: `pytest`, `ruff`.
+
+## 3. Cài đặt
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e ".[dev]"
 ```
 
-**Bước 3:** Kiểm tra thông báo trên Terminal để xác nhận Server đã khởi động thành công.
+## 4. Chạy nhanh
 
-Server sử dụng cấu hình mặc định:
+### Cách khuyến nghị: một tiến trình cho TFTP + Admin API
 
-| Thông số | Giá trị |
-|---|---|
-| Host | `0.0.0.0` |
-| Port | `6969` |
-| Thư mục lưu file | `server_storage` |
-| Block size | `512 bytes` |
-| Timeout | `3 giây` |
-| Số lần thử lại | `5` |
+```powershell
+# Đặt mật khẩu admin trước lần chạy đầu tiên (khuyến nghị)
+$env:TFTP_ADMIN_PASSWORD = "MatKhauManh123!"
+python tftp_pro.py
+```
 
-Các file được Upload lên Server sẽ được lưu trong thư mục `server_storage`.
+Mặc định:
 
-## 3. Khởi động TFTP Client
+- TFTP UDP: `0.0.0.0:6969`, thư mục chia sẻ `server_storage`.
+- Admin API: `http://127.0.0.1:6971`, SQLite `tftp_admin.db`.
+- Metrics SQLite: `tftp_admin.metrics.db` (cùng thư mục với DB admin).
+- PXE profile: `pxe_profiles.json`.
 
-**Bước 1:** Mở một cửa sổ Terminal hoặc PowerShell khác tại thư mục dự án.
+Chạy tách dịch vụ (vẫn được hỗ trợ):
 
-**Bước 2:** Chạy lệnh:
+```powershell
+python tftp_server.py
+python admin_api.py --root server_storage --db tftp_admin.db
+```
 
-```bash
+Chạy GUI:
+
+```powershell
 python tftp_gui.py
 ```
 
-**Bước 3:** Giao diện TFTP Pro sẽ xuất hiện.
+Lần đầu chạy `tftp_pro.py` hoặc `admin_api.py`, nếu database chưa có tài khoản,
+chương trình tạo `admin` với mật khẩu lấy từ biến môi trường
+`TFTP_ADMIN_PASSWORD`, hoặc fallback `admin`. Log sẽ cảnh báo khi dùng mật khẩu
+mặc định; hãy đổi ngay trong tab **Người dùng** hoặc qua API.
 
-**Bước 4:** Nhập thông tin kết nối:
+## 5. Đăng nhập Admin API
 
-- Host: `127.0.0.1` nếu Client và Server chạy trên cùng một máy.
-- Port: `6969`.
+Ví dụ PowerShell:
 
-Nếu Client kết nối đến Server trên máy tính khác, nhập địa chỉ IP của máy chạy Server thay cho `127.0.0.1`.
+```powershell
+$login = Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:6971/api/auth/login `
+  -ContentType "application/json" `
+  -Body '{"username":"admin","password":"MatKhauManh123!"}'
 
-## 4. Thực hiện Upload
+$headers = @{ Authorization = "Bearer $($login.token)" }
+Invoke-RestMethod -Uri http://127.0.0.1:6971/api/dashboard -Headers $headers
+```
 
-Upload là quá trình gửi file từ máy Client lên Server.
+Hoặc dùng curl:
 
-1. Chọn chức năng Upload trên giao diện.
-2. Chọn file cần gửi từ máy tính.
-3. Nhấn nút Upload để bắt đầu truyền file.
-4. Theo dõi thanh tiến trình và nhật ký hoạt động.
-5. Khi hoàn tất, file được lưu trong thư mục `server_storage` trên máy Server.
+```bash
+curl -s -X POST http://127.0.0.1:6971/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"MatKhauManh123!"}'
+```
 
-Tên file trên Server được lấy từ tên file đã chọn trên máy Client.
+Token có hiệu lực 8 giờ. Gọi `POST /api/auth/logout` để thu hồi token hiện tại.
+Chi tiết endpoint và quyền: [docs/admin_api.md](docs/admin_api.md).
 
-## 5. Thực hiện Download
+## 6. Giao diện GUI
 
-Download là quá trình tải file từ Server về máy Client.
+Thanh trên cùng cấu hình TFTP IP, Port, Window và Admin API URL/tài khoản.
 
-1. Chọn chức năng Download trên giao diện.
-2. Nhập tên file cần tải hoặc chọn tên file từ phần gợi ý lịch sử nếu có.
-3. Nhấn Download để mở hộp thoại Save As.
-4. Chọn ổ đĩa và thư mục muốn lưu file trên máy tính.
-5. Nhập tên file nếu muốn thay đổi tên lưu.
-6. Nhấn Save để xác nhận vị trí lưu và bắt đầu tải file.
-7. Theo dõi thanh tiến trình cho đến khi hoàn tất.
+| Tab | Chức năng |
+|---|---|
+| **Truyền file** | Upload/download TFTP, tiến trình, tốc độ, ETA, log, cancel. Danh sách file lấy từ dịch vụ listing cũ (TCP `port+1`). |
+| **File Manager** | Duyệt/tìm file qua Admin API; upload, download, rename, tạo thư mục, xóa, xem metadata và SHA-256. |
+| **Dashboard** | Số client hoạt động, tổng phiên, dung lượng, tốc độ trung bình, timeout/retry, phiên gần đây. |
+| **Packet Analyzer** | Lọc trace theo opcode/chiều, xem block, payload, source/destination và thống kê gói. |
+| **Người dùng** | Tạo/xóa tài khoản, đổi role, bật/tắt, đặt lại mật khẩu (yêu cầu quyền admin). |
+| **PXE** | Tạo/sửa/xóa profile BIOS/UEFI, chọn boot file mặc định, kiểm tra file tồn tại. |
 
-## 6. Theo dõi quá trình truyền file
+Upload/download TFTP vẫn hoạt động khi chưa đăng nhập Admin API. Đăng nhập để
+dùng File Manager, Dashboard, Packet Analyzer, quản lý người dùng/PXE và để
+đối chiếu SHA-256 với Server sau khi truyền.
 
-Trong quá trình Upload hoặc Download, giao diện hiển thị:
+## 7. CLI
 
-- Tiến trình truyền file.
-- Phần trăm dữ liệu đã truyền.
-- Dung lượng dữ liệu đã truyền.
-- Tốc độ truyền dữ liệu.
-- Thời gian dự kiến còn lại (ETA).
-- Nhật ký hoạt động và thông báo lỗi.
+```powershell
+# Download
+python tftp_client.py --host 127.0.0.1 --port 6969 get README.md .\README.downloaded.md
 
-Người dùng có thể nhấn Cancel để hủy quá trình truyền file.
+# Upload
+python tftp_client.py --host 127.0.0.1 --port 6969 put .\README.md README.md
 
-## 7. Kiểm tra kết quả
+# Tăng cửa sổ khi cả hai phía hỗ trợ RFC 7440
+python tftp_client.py --host 127.0.0.1 --port 6969 --blksize 1456 --windowsize 8 get big.bin .\big.bin
 
-Sau khi Upload:
-- Kiểm tra file trong thư mục `server_storage` trên máy Server.
-- Đối chiếu tên và dung lượng file.
+# Server độc lập
+python tftp_server.py --host 0.0.0.0 --port 6969 --root .\server_storage --max-clients 20
+```
 
-Sau khi Download:
-- Kiểm tra file tại thư mục đã chọn trong hộp thoại Save As.
-- Đối chiếu tên và dung lượng file với file trên Server.
+`windowsize = 1` là mặc định của client và tương đương stop-and-wait cũ. Nếu
+server không trả `windowsize` trong OACK, client tự dùng `1`.
 
-## 8. Lưu ý
+## 8. SHA-256 và tính toàn vẹn
 
-- Cần khởi động Server trước khi chạy Client.
-- Client và Server phải sử dụng đúng địa chỉ IP và cổng kết nối.
-- Nếu chạy trên hai máy khác nhau, cần bảo đảm kết nối mạng và cho phép lưu lượng UDP qua Firewall.
-- Lịch sử tên file trên Client chỉ là những tên file đã sử dụng hoặc đã biết, không phải danh sách file thực tế trên Server.
-- Server hỗ trợ RRQ (Download), WRQ (Upload) và liệt kê file qua dịch vụ TCP trên cổng `port+1` (nút "Làm mới" trong GUI). Chưa hỗ trợ xóa file trực tiếp trên Server.
+- Server tính hash khi lưu file và cung cấp qua `GET /api/files/hash` hoặc header
+  `X-File-SHA256` khi download qua Admin API.
+- GUI tính hash file local, lấy hash Server qua Admin API và hiển thị
+  `VERIFIED` hoặc `MISMATCH`.
+- `POST /api/files/verify` kiểm tra một hash mong đợi.
+- Hash chỉ xác nhận nội dung file trùng khớp; nó không thay thế xác thực, mã hóa
+  hay bảo đảm an toàn đường truyền.
 
+## 9. Benchmark
+
+```powershell
+python scripts/benchmark_tftp.py --size 2MiB --runs 3
+python scripts/benchmark_tftp.py --size 4MiB --runs 3 --json-out benchmark.json
+```
+
+Script đo download + upload cho các cấu hình A–E, kiểm tra SHA-256 sau mỗi lần
+và ghi nhận thời gian, tốc độ, timeout/retry. Chỉ so sánh các lần chạy trên cùng
+máy, cùng mạng và cùng kích thước file. Xem [docs/benchmark.md](docs/benchmark.md).
+
+## 10. PXE trong lab
+
+TFTP Pro chỉ quản lý boot profile và cung cấp boot file qua TFTP; DHCP là dịch
+vụ độc lập trong mạng lab. Thư mục mặc định:
+
+```text
+server_storage/
+  pxe/
+    boot/     # boot file BIOS, ví dụ undionly.kpxe
+    efi/      # boot file UEFI, ví dụ ipxe.efi
+    config/   # cấu hình iPXE/script
+```
+
+Upload boot file thật vào các thư mục trên, sau đó tạo profile trong tab **PXE**
+hoặc qua `/api/pxe/profiles`. Profile mẫu `lab-default` được tạo tự động và có
+thể báo thiếu file cho đến khi boot file được upload. Xem
+[docs/pxe_lab.md](docs/pxe_lab.md).
+
+> Chỉ bật DHCP thử nghiệm trong mạng Host-only/isolated hoặc môi trường được
+> quản lý. Không bật DHCP trên Wi-Fi dùng chung, mạng gia đình hoặc mạng lớp học.
+
+## 11. Cấu hình mặc định
+
+| Thông số | Mặc định | Ghi đè |
+|---|---|---|
+| TFTP host/port | `0.0.0.0:6969` | `--host`, `--port` |
+| Client host/port | `127.0.0.1:6969` | `--host`, `--port` |
+| Thư mục chia sẻ | `server_storage` | `--root` |
+| Block size | `512` | `--blksize` |
+| Timeout / retries | `3.0 s` / `5` | `--timeout`, `--retries` |
+| Max clients | `20` | `--max-clients` |
+| Client windowsize | `1` | `--windowsize` |
+| Server windowsize tối đa | `16` | `--windowsize` |
+| Admin API | `127.0.0.1:6971` | `--admin-host`, `--admin-port` |
+| Admin DB | `tftp_admin.db` | `--admin-db`, `--db` |
+| Admin body tối đa | `64 MiB` | hằng số `DEFAULT_MAX_ADMIN_BODY` |
+| Token TTL | `8 giờ` | `AuthManager(token_ttl=...)` |
+| PXE profiles | `pxe_profiles.json` | `--pxe-profiles` |
+
+Các giá trị nằm trong `tftp_config.py`; CLI/GUI/benchmark dùng chung để tránh
+lệch cổng hoặc block size.
+
+## 12. Bảo mật và giới hạn
+
+- Không expose TFTP/Admin API ra Internet; ưu tiên LAN/lab hoặc VPN.
+- Admin API mặc định chỉ localhost. Nếu bind địa chỉ khác, chương trình cảnh báo;
+  phải dùng mật khẩu mạnh, firewall và mạng tin cậy.
+- Mật khẩu lưu bằng PBKDF2-HMAC-SHA256 + salt; token lưu dạng SHA-256, không lưu
+  token gốc. Log không ghi mật khẩu/token.
+- Mọi đường dẫn file đi qua `StorageManager`; `..`, đường dẫn tuyệt đối, ổ đĩa
+  Windows và symlink/junction thoát root đều bị từ chối.
+- PXE chỉ là cấu hình/profile + hướng dẫn lab; dự án không triển khai DHCP server.
+- SHA-256 không biến TFTP thành giao thức an toàn.
+
+## 13. Kiểm thử
+
+```powershell
+python -m pytest -q
+python -m ruff check .
+```
+
+Bộ test bao phủ packet/option, windowsize/fallback, storage/path traversal, auth,
+Admin API, metrics, packet analyzer, SHA-256, PXE và cấu hình mặc định.
+
+## 14. Tài liệu
+
+- [docs/architecture.md](docs/architecture.md) – kiến trúc, luồng dữ liệu, module.
+- [docs/admin_api.md](docs/admin_api.md) – endpoint, quyền, ví dụ gọi API.
+- [docs/benchmark.md](docs/benchmark.md) – cách đo và đọc kết quả.
+- [docs/pxe_lab.md](docs/pxe_lab.md) – dựng lab DHCP + TFTP + PXE client.
+- [protocol.md](protocol.md) – chi tiết gói tin, option, RFC 7440.
+- [docs/interface.md](docs/interface.md) – interface module và CLI.
+- [docs/protocol.md](docs/protocol.md) – bản tóm tắt giao thức tiếng Anh.
 
 ---
 
-# TFTP Pro (English)
+# TFTP Pro (English summary)
 
-A small, reliable TFTP client/server with GUI, implementing RFC 1350 and optional blksize/timeout/tsize (RFC 2347-2349).
+TFTP Pro is a Python TFTP client/server with a Tkinter GUI, a separate authenticated
+Admin API, SHA-256 integrity checks, monitoring/packet analysis, and isolated-lab
+PXE profiles. It implements RFC 1350, RFC 2347–2349 and RFC 7440; the client
+defaults to `windowsize = 1` for backward compatibility.
 
-## Features
-- RFC 1350: RRQ, WRQ, DATA, ACK, ERROR
-- Multi-client server, ephemeral TID, stop-and-wait retry
-- GUI with progress, cancel and packet log
-- CLI: `tftp-server`, `tftp-client get/put`
-- Optional blksize/timeout/tsize
-- Atomic transfer, path traversal protection
-- File listing via TCP on `port+1` (GUI refresh button)
-
-## Quick start (from source)
 ```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-python tftp_server.py --root ./server_storage
+export TFTP_ADMIN_PASSWORD='change-me'   # PowerShell: $env:TFTP_ADMIN_PASSWORD='change-me'
+python tftp_pro.py                       # TFTP :6969 + Admin API 127.0.0.1:6971
 python tftp_gui.py
+python tftp_client.py get README.md ./README.downloaded.md
+python scripts/benchmark_tftp.py --size 2MiB --runs 3
 ```
 
-## CLI
-```bash
-python tftp_client.py --host 127.0.0.1 --port 6969 put ./README.md README.md
-python tftp_client.py --host 127.0.0.1 --port 6969 get README.md ./README.downloaded.md
-```
-
-## Server options
-| Option | Default | Description |
-|---|---|---|
-| `--host` | 0.0.0.0 | Bind address |
-| `--port` | 6969 | UDP port |
-| `--root` | server_storage | Shared folder |
-| `--timeout` | 3.0 | Seconds |
-| `--retries` | 5 | Retransmissions |
-| `--max-clients` | 20 | Concurrent sessions |
-| `--overwrite` | off | Allow overwrite |
+The Admin API binds to localhost by default. Do not expose TFTP or the Admin API
+to the Internet. The project does not implement a DHCP server; PXE support is
+limited to boot profiles and files for an isolated lab. See the Vietnamese
+sections above and the documents in `docs/` for details.

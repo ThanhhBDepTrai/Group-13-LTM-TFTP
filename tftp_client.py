@@ -1,22 +1,38 @@
-"""TFTP client core (RFC 1350) with retry, TID validation and atomic writes."""
+"""TFTP client core (RFC 1350 + RFC 7440 window size) with retry, TID checks.
+
+Thiết kế:
+    * ``windowsize = 1`` cho hành vi stop-and-wait tương thích RFC 1350.
+    * ``windowsize > 1``: gửi/nhận một cửa sổ nhiều DATA block trước khi chờ
+      ACK của block cuối cửa sổ (RFC 7440).
+    * Nếu server không trả ``windowsize`` trong OACK, client tự fallback về 1.
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import socket
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from tftp_config import (
+    DEFAULT_BLKSIZE,
+    DEFAULT_CLIENT_HOST,
+    DEFAULT_PORT,
+    DEFAULT_RETRIES,
+    DEFAULT_TIMEOUT,
+    DEFAULT_WINDOWSIZE,
+)
+from tftp_options import TransferOptions
 from tftp_packet import (
-    BLOCK_SIZE,
     MAX_PACKET_SIZE,
     OP_ACK,
     OP_DATA,
     OP_ERROR,
     OP_OACK,
-    TFTPError,
     pack_ack,
     pack_data,
     pack_error,
@@ -24,6 +40,14 @@ from tftp_packet import (
     pack_wrq,
     unpack_packet,
 )
+
+_BLOCK_MASK = 0xFFFF
+logger = logging.getLogger(__name__)
+
+
+def _block_for_index(index: int) -> int:
+    """Chỉ số tuyệt đối (bắt đầu 1) -> block number 16-bit (1,2,...,65535,0,1...)."""
+    return index & _BLOCK_MASK
 
 
 class TFTPErrorClient(Exception):
@@ -34,21 +58,53 @@ class TFTPClient:
     def __init__(
         self,
         host: str,
-        port: int = 69,
-        timeout: float = 3.0,
-        retries: int = 5,
-        blksize: int = BLOCK_SIZE,
+        port: int = DEFAULT_PORT,
+        timeout: float = DEFAULT_TIMEOUT,
+        retries: int = DEFAULT_RETRIES,
+        blksize: int = DEFAULT_BLKSIZE,
+        windowsize: int = DEFAULT_WINDOWSIZE,
         on_log: Callable[[str], None] | None = None,
+        tracer=None,
     ):
+        if not 1 <= windowsize <= 65535:
+            raise ValueError("windowsize must be 1..65535")
         self.host = host
         self.port = port
         self.timeout = timeout
         self.retries = retries
         self.blksize = blksize
+        self.windowsize = windowsize
         self.on_log = on_log or (lambda message: None)
+        self.tracer = tracer
 
     def _log(self, msg: str) -> None:
         self.on_log(msg)
+
+    # ------------------------------------------------------------------ #
+    # Packet trace (tùy chọn, không ảnh hưởng giao thức)
+    # ------------------------------------------------------------------ #
+    def _trace_packet(self, raw: bytes, sock, peer, direction: str) -> None:
+        if self.tracer is None:
+            return
+        try:
+            local = sock.getsockname()
+            self.tracer.record_raw(
+                raw,
+                source=f"{local[0]}:{local[1]}",
+                destination=f"{peer[0]}:{peer[1]}",
+                direction=direction,
+            )
+        except Exception:
+            logger.debug("Packet trace failed", exc_info=True)
+
+    def _send(self, sock, raw: bytes, peer) -> None:
+        sock.sendto(raw, peer)
+        self._trace_packet(raw, sock, peer, "Client -> Server")
+
+    def _recv(self, sock):
+        raw, peer = sock.recvfrom(MAX_PACKET_SIZE)
+        self._trace_packet(raw, sock, peer, "Server -> Client")
+        return raw, peer
 
     def list_files(self) -> list[str]:
         """Get the current file list from the server over TCP port + 1."""
@@ -81,6 +137,10 @@ class TFTPClient:
 
         return [str(name) for name in files]
 
+    @staticmethod
+    def _cancelled(cancel: object | None) -> bool:
+        return cancel is not None and bool(getattr(cancel, "is_set", lambda: False)())
+
     def download(
         self,
         remote: str,
@@ -91,119 +151,177 @@ class TFTPClient:
         local = Path(local)
         local.parent.mkdir(parents=True, exist_ok=True)
         tmp = local.with_name(local.name + ".part")
-        if tmp.exists():
-            tmp.unlink()
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+        requested = TransferOptions(
+            blksize=self.blksize,
+            timeout=self.timeout,
+            windowsize=self.windowsize,
+        )
+        options = requested.as_request_options(upload=False)
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind(("", 0))
         sock.settimeout(self.timeout)
 
-        server_tid = None
-        total_size = None
-        expected_block = 1
+        server_tid: tuple[str, int] | None = None
         blksize = self.blksize
         timeout = self.timeout
+        windowsize = DEFAULT_WINDOWSIZE
+        total_size: int | None = None
         received = 0
-
-        options = {}
-        if blksize != BLOCK_SIZE:
-            options["blksize"] = str(blksize)
-        options["timeout"] = str(int(timeout))
-        options["tsize"] = "0"
+        expected_index = 1
+        last_block = 0
+        window_count = 0
+        pending_packet = None
+        file = None
+        success = False
 
         try:
             if on_progress:
                 on_progress(0, None)
 
-            sock.sendto(pack_rrq(remote, options=options), (self.host, self.port))
+            self._send(sock, pack_rrq(remote, options=options), (self.host, self.port))
 
+            # ---- handshake: OACK (preferred) hoặc DATA đầu tiên (server cũ) ----
+            attempts = 0
             while True:
-                if cancel is not None and getattr(cancel, "is_set", lambda: False)():
+                if self._cancelled(cancel):
                     raise TFTPErrorClient("Cancelled")
-
-                for attempt in range(1, self.retries + 1):
-                    try:
-                        raw, peer = sock.recvfrom(MAX_PACKET_SIZE)
-                        break
-                    except TimeoutError:
-                        if cancel is not None and getattr(
-                            cancel, "is_set", lambda: False
-                        )():
-                            raise TFTPErrorClient("Cancelled")
-
-                        self._log(f"Timeout waiting DATA, retry {attempt}")
-                        if expected_block > 1:
-                            sock.sendto(
-                                pack_ack(expected_block - 1),
-                                server_tid or (self.host, self.port),
-                            )
-                        else:
-                            sock.sendto(
-                                pack_rrq(remote, options=options),
-                                (self.host, self.port),
-                            )
-                else:
-                    raise TimeoutError("No response from server")
+                try:
+                    raw, peer = self._recv(sock)
+                except (TimeoutError, ConnectionResetError):
+                    attempts += 1
+                    if attempts >= self.retries:
+                        raise TimeoutError("No response from server") from None
+                    self._log(f"Timeout waiting OACK, retry {attempts}")
+                    self._send(sock, 
+                        pack_rrq(remote, options=options), (self.host, self.port)
+                    )
+                    continue
 
                 if server_tid is None:
                     server_tid = peer
                 if peer != server_tid:
-                    sock.sendto(pack_error(5, "Unknown TID"), peer)
+                    self._send(sock, pack_error(5, "Unknown TID"), peer)
                     continue
 
-                try:
-                    pkt = unpack_packet(raw)
-                except TFTPError as exc:
-                    raise TFTPErrorClient(str(exc))
-
-                if pkt.opcode == OP_ERROR:
+                packet = unpack_packet(raw)
+                if packet.opcode == OP_ERROR:
                     raise TFTPErrorClient(
-                        f"Server error {pkt.error_code}: {pkt.error_msg}"
+                        f"Server error {packet.error_code}: {packet.error_msg}"
                     )
+                if packet.opcode == OP_OACK:
+                    negotiated = TransferOptions.from_oack(
+                        packet.options,
+                        fallback_blksize=self.blksize,
+                        fallback_timeout=self.timeout,
+                    )
+                    blksize = negotiated.blksize
+                    timeout = negotiated.timeout
+                    windowsize = negotiated.windowsize
+                    total_size = negotiated.tsize
+                    sock.settimeout(timeout)
+                    self._send(sock, pack_ack(0), server_tid)
+                    self._log(
+                        f"OACK: blksize={blksize}, timeout={timeout:g}, "
+                        f"windowsize={windowsize}, tsize={total_size}"
+                    )
+                    break
+                if packet.opcode == OP_DATA:
+                    # Server bỏ qua option và gửi thẳng dữ liệu.
+                    pending_packet = packet
+                    break
+                raise TFTPErrorClient("Unexpected response to RRQ")
 
-                if pkt.opcode == OP_OACK:
-                    if "blksize" in pkt.options:
-                        blksize = int(pkt.options["blksize"])
-                    if "timeout" in pkt.options:
-                        timeout = float(pkt.options["timeout"])
-                        sock.settimeout(timeout)
-                    if "tsize" in pkt.options:
-                        try:
-                            total_size = int(pkt.options["tsize"])
-                        except ValueError:
-                            total_size = None
+            file = open(tmp, "wb")  # noqa: SIM115 - đóng thủ công trong finally
+            attempts = 0
 
-                    sock.sendto(pack_ack(0), server_tid)
-                    if on_progress:
-                        on_progress(received, total_size)
+            while True:
+                if self._cancelled(cancel):
+                    raise TFTPErrorClient("Cancelled")
+
+                if pending_packet is not None:
+                    packet = pending_packet
+                    pending_packet = None
+                else:
+                    try:
+                        raw, peer = self._recv(sock)
+                    except (TimeoutError, ConnectionResetError):
+                        attempts += 1
+                        if attempts >= self.retries:
+                            raise TimeoutError("No response from server") from None
+                        self._log(f"Timeout waiting DATA, retry {attempts}")
+                        # ACK block cuối đã nhận để server gửi lại từ đó.
+                        if last_block or windowsize == 1:
+                            self._send(sock, 
+                                pack_ack(last_block),
+                                server_tid or (self.host, self.port),
+                            )
+                        else:
+                            self._send(sock, 
+                                pack_rrq(remote, options=options),
+                                (self.host, self.port),
+                            )
+                        continue
+
+                    if peer != server_tid:
+                        self._send(sock, pack_error(5, "Unknown TID"), peer)
+                        continue
+                    packet = unpack_packet(raw)
+
+                if packet.opcode == OP_ERROR:
+                    raise TFTPErrorClient(
+                        f"Server error {packet.error_code}: {packet.error_msg}"
+                    )
+                if packet.opcode != OP_DATA:
                     continue
 
-                if pkt.opcode != OP_DATA:
-                    continue
+                attempts = 0
+                expected_block = _block_for_index(expected_index)
 
-                if pkt.block == expected_block:
-                    with open(tmp, "ab") as file:
-                        file.write(pkt.data)
+                if packet.block == expected_block:
+                    file.write(packet.data)
+                    received += len(packet.data)
+                    last_block = packet.block
+                    expected_index += 1
+                    window_count += 1
+                    is_final = len(packet.data) < blksize
 
-                    received += len(pkt.data)
-                    sock.sendto(pack_ack(expected_block), server_tid)
-
-                    if on_progress:
+                    if is_final or window_count >= windowsize:
+                        self._send(sock, pack_ack(packet.block), server_tid)
+                        window_count = 0
+                        if on_progress:
+                            on_progress(received, total_size)
+                    elif on_progress:
                         on_progress(received, total_size)
 
-                    if len(pkt.data) < blksize:
+                    if is_final:
+                        file.close()
+                        file = None
                         os.replace(tmp, local)
+                        success = True
                         self._log(f"Downloaded {received} bytes")
                         return received
 
-                    expected_block = (expected_block + 1) & 0xFFFF
-
-                elif pkt.block < expected_block:
-                    sock.sendto(pack_ack(pkt.block), server_tid)
+                elif packet.block == last_block:
+                    # ACK bị mất: nhắc lại block cuối đã nhận đúng.
+                    self._send(sock, pack_ack(last_block), server_tid)
+                else:
+                    # Lỗi thứ tự: ACK block cuối đúng, server sẽ gửi lại từ đó.
+                    self._send(sock, pack_ack(last_block), server_tid)
 
         finally:
+            if file is not None:
+                try:
+                    file.close()
+                except OSError:
+                    pass
             sock.close()
-            if cancel is not None and getattr(cancel, "is_set", lambda: False)():
+            if not success:
                 try:
                     tmp.unlink(missing_ok=True)
                 except OSError:
@@ -221,111 +339,156 @@ class TFTPClient:
             remote = local.name
 
         size = local.stat().st_size
+        requested = TransferOptions(
+            blksize=self.blksize,
+            timeout=self.timeout,
+            windowsize=self.windowsize,
+        )
+        options = requested.as_request_options(upload=True, file_size=size)
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind(("", 0))
         sock.settimeout(self.timeout)
 
-        server_tid = None
+        server_tid: tuple[str, int] | None = None
         blksize = self.blksize
         timeout = self.timeout
+        windowsize = DEFAULT_WINDOWSIZE
         sent = 0
-        block = 1
-
-        options = {}
-        if blksize != BLOCK_SIZE:
-            options["blksize"] = str(blksize)
-        options["timeout"] = str(int(timeout))
-        options["tsize"] = str(size)
 
         try:
             if on_progress:
                 on_progress(0, size)
 
-            sock.sendto(pack_wrq(remote, options=options), (self.host, self.port))
+            self._send(sock, pack_wrq(remote, options=options), (self.host, self.port))
 
-            for attempt in range(1, self.retries + 1):
+            # ---- handshake ----
+            attempts = 0
+            while True:
+                if self._cancelled(cancel):
+                    raise TFTPErrorClient("Cancelled")
                 try:
-                    raw, peer = sock.recvfrom(MAX_PACKET_SIZE)
-                    break
-                except TimeoutError:
-                    if cancel is not None and getattr(
-                        cancel, "is_set", lambda: False
-                    )():
-                        raise TFTPErrorClient("Cancelled")
+                    raw, peer = self._recv(sock)
+                except (TimeoutError, ConnectionResetError):
+                    attempts += 1
+                    if attempts >= self.retries:
+                        raise TimeoutError("No response from server") from None
+                    self._log(f"Timeout waiting ACK0, retry {attempts}")
+                    self._send(sock, 
+                        pack_wrq(remote, options=options), (self.host, self.port)
+                    )
+                    continue
 
-                    self._log(f"Timeout waiting ACK0, retry {attempt}")
-                    sock.sendto(pack_wrq(remote, options=options), (self.host, self.port))
-            else:
-                raise TimeoutError("No response from server")
+                if server_tid is None:
+                    server_tid = peer
+                if peer != server_tid:
+                    self._send(sock, pack_error(5, "Unknown TID"), peer)
+                    continue
 
-            server_tid = peer
-            pkt = unpack_packet(raw)
-
-            if pkt.opcode == OP_ERROR:
-                raise TFTPErrorClient(
-                    f"Server error {pkt.error_code}: {pkt.error_msg}"
-                )
-
-            if pkt.opcode == OP_OACK:
-                if "blksize" in pkt.options:
-                    blksize = int(pkt.options["blksize"])
-                if "timeout" in pkt.options:
-                    timeout = float(pkt.options["timeout"])
+                packet = unpack_packet(raw)
+                if packet.opcode == OP_ERROR:
+                    raise TFTPErrorClient(
+                        f"Server error {packet.error_code}: {packet.error_msg}"
+                    )
+                if packet.opcode == OP_OACK:
+                    negotiated = TransferOptions.from_oack(
+                        packet.options,
+                        fallback_blksize=self.blksize,
+                        fallback_timeout=self.timeout,
+                    )
+                    blksize = negotiated.blksize
+                    timeout = negotiated.timeout
+                    windowsize = negotiated.windowsize
                     sock.settimeout(timeout)
-                sock.sendto(pack_ack(0), server_tid)
-            elif pkt.opcode == OP_ACK and pkt.block == 0:
-                pass
-            else:
+                    self._send(sock, pack_ack(0), server_tid)
+                    self._log(
+                        f"OACK: blksize={blksize}, timeout={timeout:g}, "
+                        f"windowsize={windowsize}"
+                    )
+                    break
+                if packet.opcode == OP_ACK and packet.block == 0:
+                    break
                 raise TFTPErrorClient("Unexpected response to WRQ")
 
+            total_blocks = size // blksize + 1  # luôn có block cuối ngắn/rỗng
+            base_index = 1
+
             with open(local, "rb") as file:
-                while True:
-                    if cancel is not None and getattr(
-                        cancel, "is_set", lambda: False
-                    )():
+                while base_index <= total_blocks:
+                    if self._cancelled(cancel):
                         raise TFTPErrorClient("Cancelled")
 
-                    chunk = file.read(blksize)
+                    last_index = min(base_index + windowsize - 1, total_blocks)
+                    window: list[tuple[int, int, bytes]] = []
+                    for index in range(base_index, last_index + 1):
+                        file.seek((index - 1) * blksize)
+                        window.append((index, _block_for_index(index), file.read(blksize)))
 
-                    for attempt in range(1, self.retries + 1):
-                        sock.sendto(pack_data(block, chunk), server_tid)
+                    retry = 0
+                    advanced = False
+                    while retry < self.retries:
+                        if self._cancelled(cancel):
+                            raise TFTPErrorClient("Cancelled")
+
+                        for _index, block, chunk in window:
+                            self._send(sock, pack_data(block, chunk), server_tid)
 
                         try:
-                            raw, peer = sock.recvfrom(MAX_PACKET_SIZE)
-                        except TimeoutError:
-                            if cancel is not None and getattr(
-                                cancel, "is_set", lambda: False
-                            )():
-                                raise TFTPErrorClient("Cancelled")
+                            while True:
+                                raw, peer = self._recv(sock)
+                                if peer != server_tid:
+                                    self._send(sock, pack_error(5, "Unknown TID"), peer)
+                                    continue
 
+                                ack = unpack_packet(raw)
+                                if ack.opcode == OP_ERROR:
+                                    raise TFTPErrorClient(
+                                        f"Server error {ack.error_code}: {ack.error_msg}"
+                                    )
+                                if ack.opcode != OP_ACK:
+                                    continue
+
+                                # Tìm ACK trong cửa sổ hiện tại (kể cả ACK cũ).
+                                acked_position = next(
+                                    (
+                                        position
+                                        for position, (_i, b, _c) in enumerate(window)
+                                        if b == ack.block
+                                    ),
+                                    None,
+                                )
+                                if acked_position is None:
+                                    self._log(
+                                        f"Ignoring duplicate/old ACK {ack.block}"
+                                    )
+                                    continue
+
+                                for _i, _b, chunk in window[: acked_position + 1]:
+                                    sent += len(chunk)
+                                base_index = window[acked_position][0] + 1
+                                if on_progress:
+                                    on_progress(sent, size)
+                                advanced = True
+                                break
+                        except (TimeoutError, ConnectionResetError):
+                            retry += 1
+                            if retry >= self.retries:
+                                raise TimeoutError(
+                                    f"No ACK for block {window[-1][1]}"
+                                ) from None
                             self._log(
-                                f"Timeout waiting ACK block {block}, retry {attempt}"
+                                f"Timeout waiting ACK block {window[-1][1]}, "
+                                f"retry {retry}"
                             )
                             continue
 
-                        if peer != server_tid:
-                            sock.sendto(pack_error(5, "Unknown TID"), peer)
-                            continue
-
-                        ack = unpack_packet(raw)
-                        if ack.opcode == OP_ERROR:
-                            raise TFTPErrorClient(
-                                f"Server error {ack.error_code}: {ack.error_msg}"
-                            )
-
-                        if ack.opcode == OP_ACK and ack.block == block:
-                            sent += len(chunk)
-                            if on_progress:
-                                on_progress(sent, size)
-
-                            if len(chunk) < blksize:
-                                self._log(f"Uploaded {sent} bytes")
-                                return sent
-
-                            block = (block + 1) & 0xFFFF
+                        if advanced:
                             break
-                    else:
-                        raise TimeoutError(f"No ACK for block {block}")
+                    else:  # pragma: no cover - vòng lặp đã raise ở trên
+                        raise TimeoutError(f"No ACK for block {window[-1][1]}")
+
+            self._log(f"Uploaded {sent} bytes")
+            return sent
 
         finally:
             sock.close()
@@ -335,9 +498,18 @@ class TFTPClient:
 
 
 def main(argv=None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(prog="tftp-client")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=69)
+    parser.add_argument("--host", default=DEFAULT_CLIENT_HOST)
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
+    parser.add_argument("--retries", type=int, default=DEFAULT_RETRIES)
+    parser.add_argument("--blksize", type=int, default=DEFAULT_BLKSIZE)
+    parser.add_argument("--windowsize", type=int, default=DEFAULT_WINDOWSIZE)
 
     sub = parser.add_subparsers(dest="cmd", required=True)
     get = sub.add_parser("get")
@@ -349,7 +521,15 @@ def main(argv=None) -> int:
     put.add_argument("remote", nargs="?")
 
     args = parser.parse_args(argv)
-    client = TFTPClient(args.host, args.port, on_log=print)
+    client = TFTPClient(
+        args.host,
+        args.port,
+        timeout=args.timeout,
+        retries=args.retries,
+        blksize=args.blksize,
+        windowsize=args.windowsize,
+        on_log=print,
+    )
 
     if args.cmd == "get":
         count = client.download(args.remote, args.local)
