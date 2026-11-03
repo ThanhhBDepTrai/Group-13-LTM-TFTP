@@ -1,268 +1,394 @@
-"""Xác thực và phân quyền Admin / User / Guest.
+"""Tài khoản, vai trò và token cho Admin API.
 
-Chỉ dùng thư viện chuẩn:
-* mật khẩu: PBKDF2-HMAC-SHA256 với salt ngẫu nhiên, so sánh hằng thời gian;
-* token: ``base64url(payload).base64url(HMAC-SHA256)`` có hạn dùng (``exp``);
-* chống dò mật khẩu: khóa tạm tên đăng nhập sau nhiều lần sai liên tiếp.
+Không lưu mật khẩu dạng rõ. Mật khẩu được băm bằng PBKDF2-HMAC-SHA256 với salt
+ngẫu nhiên; token phiên được lưu dưới dạng SHA-256 (không lưu token gốc).
+
+Đây là lớp xác thực tối giản phục vụ lab, không thay thế một hệ thống IAM đầy
+đủ. Admin API mặc định chỉ bind localhost (xem tftp_config.py).
 """
 
 from __future__ import annotations
 
-import base64
-import binascii
 import hashlib
 import hmac
-import json
+import os
 import re
 import secrets
-import threading
+import sqlite3
 import time
-from dataclasses import dataclass
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
 
-from database import Database, DatabaseError
+from tftp_config import DEFAULT_TOKEN_TTL
 
-__all__ = [
-    "ADMIN", "GUEST", "USER", "ROLE_PERMISSIONS", "AuthError", "AuthService",
-    "PermissionDenied", "User",
-]
+_PBKDF2_ITERATIONS = 200_000
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_ROLES = ("admin", "user", "guest")
+MIN_PASSWORD_LENGTH = 4
 
-ADMIN, USER, GUEST = "admin", "user", "guest"
-
-ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
-    ADMIN: frozenset({
-        "files:read", "files:write", "files:delete",
-        "transfers:read", "metrics:read",
-        "pxe:read", "pxe:write", "users:manage",
-    }),
-    USER: frozenset({"files:read", "files:write", "transfers:read", "pxe:read"}),
-    GUEST: frozenset({"files:read"}),
+ROLE_PERMISSIONS: dict[str, set[str]] = {
+    "admin": {
+        "files.list",
+        "files.read",
+        "files.download",
+        "files.upload",
+        "files.delete",
+        "files.rename",
+        "files.mkdir",
+        "users.manage",
+        "stats.read",
+        "pxe.read",
+        "pxe.manage",
+    },
+    "user": {
+        "files.list",
+        "files.read",
+        "files.download",
+        "files.upload",
+        "stats.read",
+        "pxe.read",
+    },
+    "guest": {
+        "files.list",
+        "files.read",
+        "files.download",
+        "pxe.read",
+    },
 }
-
-_USERNAME = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
-_MIN_PASSWORD = 8
 
 
 class AuthError(Exception):
-    """Sai thông tin đăng nhập, token không hợp lệ/hết hạn, hoặc dữ liệu đầu vào sai."""
+    def __init__(self, message: str, status: int = 401):
+        super().__init__(message)
+        self.message = message
+        self.status = status
 
 
-class PermissionDenied(Exception):
-    """Đã đăng nhập nhưng vai trò không đủ quyền."""
+def _now_iso() -> str:
+    return datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
 
 
-@dataclass(frozen=True)
-class User:
-    id: int
-    username: str
-    role: str
-    disabled: bool = False
-
-    def can(self, permission: str) -> bool:
-        return permission in ROLE_PERMISSIONS.get(self.role, frozenset())
+def _hash_password(password: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, _PBKDF2_ITERATIONS
+    ).hex()
 
 
-def _b64e(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def _b64d(text: str) -> bytes:
-    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
-
-
-class AuthService:
-    def __init__(
-        self,
-        db: Database,
-        secret: str | bytes,
-        *,
-        token_ttl: int = 3600,
-        iterations: int = 200_000,
-        max_failures: int = 5,
-        lockout_seconds: int = 60,
-    ):
-        key = secret.encode("utf-8") if isinstance(secret, str) else secret
-        if len(key) < 16:
-            raise ValueError("Secret must be at least 16 bytes")
-        self.db = db
-        self._key = key
+class AuthManager:
+    def __init__(self, db_path: str | Path, *, token_ttl: int = DEFAULT_TOKEN_TTL):
+        self.db_path = str(db_path)
         self.token_ttl = token_ttl
-        self.iterations = iterations
-        self.max_failures = max_failures
-        self.lockout_seconds = lockout_seconds
-        self._failures: dict[str, tuple[int, float]] = {}
-        self._lock = threading.Lock()
-        self._dummy_hash = self.hash_password("dummy-password-for-timing")
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._initialize()
 
-    # ------------------------------------------------------------------ #
-    # Mật khẩu
-    # ------------------------------------------------------------------ #
-
-    def hash_password(self, password: str) -> str:
-        salt = secrets.token_bytes(16)
-        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, self.iterations)
-        return f"pbkdf2_sha256${self.iterations}${_b64e(salt)}${_b64e(digest)}"
-
-    @staticmethod
-    def verify_password(password: str, stored: str) -> bool:
+    @contextmanager
+    def _connect(self):
+        connection = sqlite3.connect(self.db_path, timeout=5)
+        connection.row_factory = sqlite3.Row
         try:
-            scheme, iterations, salt, digest = stored.split("$")
-            if scheme != "pbkdf2_sha256":
-                return False
-            candidate = hashlib.pbkdf2_hmac(
-                "sha256", password.encode("utf-8"), _b64d(salt), int(iterations)
+            connection.execute("PRAGMA foreign_keys = ON")
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
+
+    def _initialize(self) -> None:
+        with self._connect() as connection:
+            connection.executescript(
+                """
+                PRAGMA journal_mode = WAL;
+                CREATE TABLE IF NOT EXISTS users (
+                    username TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    salt TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    active INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE TABLE IF NOT EXISTS tokens (
+                    token_hash TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    expires_at REAL NOT NULL,
+                    FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    username TEXT,
+                    action TEXT NOT NULL,
+                    detail TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_tokens_expires ON tokens(expires_at);
+                """
             )
-            return hmac.compare_digest(candidate, _b64d(digest))
-        except (ValueError, binascii.Error):
-            return False
 
     # ------------------------------------------------------------------ #
-    # Người dùng
+    # Tài khoản
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _validate_username(username: str) -> str:
+        text = str(username).strip()
+        if not _USERNAME_RE.fullmatch(text):
+            raise AuthError("Username chỉ gồm chữ, số, _ . - (1-64 ký tự)", 400)
+        return text
 
     @staticmethod
-    def _to_user(row: dict) -> User:
-        return User(row["id"], row["username"], row["role"], bool(row["disabled"]))
+    def _validate_role(role: str) -> str:
+        text = str(role).strip().lower()
+        if text not in _ROLES:
+            raise AuthError(f"Role phải là một trong: {', '.join(_ROLES)}", 400)
+        return text
 
-    def create_user(self, username: str, password: str, role: str = USER) -> User:
-        if not _USERNAME.match(username):
-            raise AuthError("Username must be 3-32 chars: letters, digits, '_', '.', '-'")
-        if len(password) < _MIN_PASSWORD:
-            raise AuthError(f"Password must be at least {_MIN_PASSWORD} characters")
-        if role not in ROLE_PERMISSIONS:
-            raise AuthError(f"Unknown role: {role}")
-        try:
-            user_id = self.db.add_user(username, self.hash_password(password), role)
-        except DatabaseError as exc:
-            raise AuthError(str(exc)) from exc
-        return User(user_id, username, role)
+    @staticmethod
+    def _validate_password(password: str) -> str:
+        text = str(password)
+        if len(text) < MIN_PASSWORD_LENGTH:
+            raise AuthError(
+                f"Mật khẩu phải có ít nhất {MIN_PASSWORD_LENGTH} ký tự", 400
+            )
+        return text
 
-    def ensure_admin(self, username: str = "admin", password: str | None = None) -> tuple[User, str | None]:
-        """Tạo admin đầu tiên nếu chưa có người dùng nào.
-
-        Trả về ``(user, mật khẩu được sinh ra hoặc None)``. Nếu đã có sẵn người
-        dùng thì trả về admin đầu tiên tìm thấy và ``None``.
-        """
-        if self.db.count_users() == 0:
-            generated = password is None
-            secret = password or secrets.token_urlsafe(12)
-            return self.create_user(username, secret, ADMIN), (secret if generated else None)
-        for row in self.db.list_users():
-            if row["role"] == ADMIN:
-                return self._to_user(row), None
-        raise AuthError("Database has users but no admin")
-
-    def get_user(self, user_id: int) -> User | None:
-        row = self.db.get_user_by_id(user_id)
-        return self._to_user(row) if row else None
-
-    def update_user(
+    def create_user(
         self,
-        user_id: int,
+        username: str,
+        password: str,
+        role: str = "user",
         *,
-        role: str | None = None,
-        disabled: bool | None = None,
-        password: str | None = None,
-    ) -> User:
-        current = self.db.get_user_by_id(user_id)
-        if current is None:
-            raise AuthError("User not found")
-        changes: dict[str, object] = {}
-        if role is not None:
-            if role not in ROLE_PERMISSIONS:
-                raise AuthError(f"Unknown role: {role}")
-            changes["role"] = role
-        if disabled is not None:
-            changes["disabled"] = int(disabled)
-        if password is not None:
-            if len(password) < _MIN_PASSWORD:
-                raise AuthError(f"Password must be at least {_MIN_PASSWORD} characters")
-            changes["password_hash"] = self.hash_password(password)
-        losing_admin = current["role"] == ADMIN and not current["disabled"] and (
-            changes.get("role", ADMIN) != ADMIN or changes.get("disabled", 0)
-        )
-        if losing_admin and self.db.count_active_admins() <= 1:
-            raise AuthError("Cannot remove the last active admin")
-        self.db.update_user(user_id, **changes)
-        return self._to_user(self.db.get_user_by_id(user_id))
+        active: bool = True,
+    ) -> dict:
+        username = self._validate_username(username)
+        role = self._validate_role(role)
+        password = self._validate_password(password)
+        salt = os.urandom(16)
+        password_hash = _hash_password(password, salt)
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    "INSERT INTO users(username, password_hash, salt, role, "
+                    "created_at, active) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        username,
+                        password_hash,
+                        salt.hex(),
+                        role,
+                        _now_iso(),
+                        1 if active else 0,
+                    ),
+                )
+                self._audit(connection, username, "user.create", f"role={role}")
+        except sqlite3.IntegrityError as exc:
+            raise AuthError("Username đã tồn tại", 409) from exc
+        return self.get_user(username)
 
-    def delete_user(self, user_id: int) -> None:
-        current = self.db.get_user_by_id(user_id)
-        if current is None:
-            raise AuthError("User not found")
-        if current["role"] == ADMIN and not current["disabled"] and self.db.count_active_admins() <= 1:
-            raise AuthError("Cannot remove the last active admin")
-        self.db.delete_user(user_id)
+    def get_user(self, username: str) -> dict:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT username, role, created_at, active FROM users WHERE username=?",
+                (username,),
+            ).fetchone()
+        if row is None:
+            raise AuthError("Không tìm thấy người dùng", 404)
+        return dict(row)
+
+    def list_users(self) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT username, role, created_at, active FROM users ORDER BY username"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_user(self, username: str) -> None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT role FROM users WHERE username=?", (username,)
+            ).fetchone()
+            if row is None:
+                raise AuthError("Không tìm thấy người dùng", 404)
+            if row["role"] == "admin":
+                admin_count = connection.execute(
+                    "SELECT COUNT(*) FROM users WHERE role='admin' AND active=1"
+                ).fetchone()[0]
+                if admin_count <= 1:
+                    raise AuthError("Không thể xóa admin cuối cùng", 409)
+            connection.execute("DELETE FROM users WHERE username=?", (username,))
+            self._audit(connection, None, "user.delete", username)
+
+    def _ensure_not_last_admin(self, connection, username: str) -> None:
+        row = connection.execute(
+            "SELECT role, active FROM users WHERE username=?", (username,)
+        ).fetchone()
+        if row is None:
+            raise AuthError("Không tìm thấy người dùng", 404)
+        if row["role"] != "admin" or not row["active"]:
+            return
+        admin_count = connection.execute(
+            "SELECT COUNT(*) FROM users WHERE role='admin' AND active=1"
+        ).fetchone()[0]
+        if admin_count <= 1:
+            raise AuthError("Không thể bỏ quyền admin cuối cùng", 409)
+
+    def set_role(self, username: str, role: str) -> dict:
+        role = self._validate_role(role)
+        with self._connect() as connection:
+            self._ensure_not_last_admin(connection, username)
+            cursor = connection.execute(
+                "UPDATE users SET role=? WHERE username=?", (role, username)
+            )
+            if cursor.rowcount == 0:
+                raise AuthError("Không tìm thấy người dùng", 404)
+            if role != "admin":
+                connection.execute("DELETE FROM tokens WHERE username=?", (username,))
+            self._audit(connection, None, "user.set_role", f"{username}={role}")
+        return self.get_user(username)
+
+    def set_active(self, username: str, active: bool) -> dict:
+        with self._connect() as connection:
+            if not active:
+                self._ensure_not_last_admin(connection, username)
+            cursor = connection.execute(
+                "UPDATE users SET active=? WHERE username=?",
+                (1 if active else 0, username),
+            )
+            if cursor.rowcount == 0:
+                raise AuthError("Không tìm thấy người dùng", 404)
+            if not active:
+                connection.execute("DELETE FROM tokens WHERE username=?", (username,))
+            self._audit(connection, None, "user.set_active", f"{username}={active}")
+        return self.get_user(username)
+
+    def change_password(self, username: str, new_password: str) -> None:
+        new_password = self._validate_password(new_password)
+        salt = os.urandom(16)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE users SET password_hash=?, salt=? WHERE username=?",
+                (_hash_password(new_password, salt), salt.hex(), username),
+            )
+            if cursor.rowcount == 0:
+                raise AuthError("Không tìm thấy người dùng", 404)
+            connection.execute("DELETE FROM tokens WHERE username=?", (username,))
+            self._audit(connection, None, "user.change_password", username)
 
     # ------------------------------------------------------------------ #
     # Đăng nhập / token
     # ------------------------------------------------------------------ #
+    def authenticate(self, username: str, password: str) -> dict:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT username, password_hash, salt, role, active "
+                "FROM users WHERE username=?",
+                (str(username).strip(),),
+            ).fetchone()
+        if row is None or not row["active"]:
+            raise AuthError("Sai tên đăng nhập hoặc mật khẩu", 401)
+        expected = row["password_hash"]
+        actual = _hash_password(str(password), bytes.fromhex(row["salt"]))
+        if not hmac.compare_digest(actual, expected):
+            raise AuthError("Sai tên đăng nhập hoặc mật khẩu", 401)
+        return {
+            "username": row["username"],
+            "role": row["role"],
+        }
 
-    def _locked(self, username: str) -> bool:
-        key = username.lower()
-        with self._lock:
-            count, since = self._failures.get(key, (0, 0.0))
-            if count >= self.max_failures:
-                if time.monotonic() - since < self.lockout_seconds:
-                    return True
-                del self._failures[key]
-            return False
-
-    def _record_failure(self, username: str) -> None:
-        key = username.lower()
-        with self._lock:
-            count, _ = self._failures.get(key, (0, 0.0))
-            self._failures[key] = (count + 1, time.monotonic())
-
-    def authenticate(self, username: str, password: str) -> User:
-        if self._locked(username):
-            raise AuthError("Too many failed attempts, try again later")
-        row = self.db.get_user(username)
-        stored = row["password_hash"] if row else self._dummy_hash  # giữ thời gian xử lý đều nhau
-        valid = self.verify_password(password, stored)
-        if not row or not valid or row["disabled"]:
-            self._record_failure(username)
-            raise AuthError("Invalid username or password")
-        with self._lock:
-            self._failures.pop(username.lower(), None)
-        return self._to_user(row)
-
-    def issue_token(self, user: User, *, now: float | None = None) -> str:
-        issued = time.time() if now is None else now
-        payload = _b64e(json.dumps(
-            {"uid": user.id, "sub": user.username, "exp": int(issued + self.token_ttl)},
-            separators=(",", ":"),
-        ).encode("utf-8"))
-        return f"{payload}.{_b64e(self._sign(payload))}"
-
-    def login(self, username: str, password: str) -> tuple[str, User]:
+    def login(self, username: str, password: str) -> dict:
         user = self.authenticate(username, password)
-        return self.issue_token(user), user
+        token = secrets.token_urlsafe(32)
+        now = time.time()
+        expires_at = now + self.token_ttl
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO tokens(token_hash, username, created_at, expires_at) "
+                "VALUES (?, ?, ?, ?)",
+                (_hash_token(token), user["username"], now, expires_at),
+            )
+            connection.execute("DELETE FROM tokens WHERE expires_at < ?", (now,))
+            self._audit(connection, user["username"], "auth.login", None)
+        return {
+            "token": token,
+            "username": user["username"],
+            "role": user["role"],
+            "expires_at": expires_at,
+        }
 
-    def user_from_token(self, token: str, *, now: float | None = None) -> User:
-        try:
-            payload, signature = token.split(".")
-            if not hmac.compare_digest(_b64d(signature), self._sign(payload)):
-                raise AuthError("Invalid token")
-            data = json.loads(_b64d(payload))
-            expires = float(data["exp"])
-            user_id = int(data["uid"])
-        except (ValueError, KeyError, TypeError, binascii.Error) as exc:
-            raise AuthError("Invalid token") from exc
-        if (time.time() if now is None else now) >= expires:
-            raise AuthError("Token expired")
-        user = self.get_user(user_id)  # đọc lại DB: đổi vai trò/khóa tài khoản có hiệu lực ngay
-        if user is None or user.disabled:
-            raise AuthError("Account is not available")
-        return user
+    def validate_token(self, token: str) -> dict:
+        if not token:
+            raise AuthError("Thiếu token", 401)
+        digest = _hash_token(token)
+        now = time.time()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT t.username, t.expires_at, u.role, u.active "
+                "FROM tokens t JOIN users u ON u.username=t.username "
+                "WHERE t.token_hash=?",
+                (digest,),
+            ).fetchone()
+            if row is None:
+                raise AuthError("Token không hợp lệ", 401)
+            if row["expires_at"] < now or not row["active"]:
+                connection.execute(
+                    "DELETE FROM tokens WHERE token_hash=?", (digest,)
+                )
+                raise AuthError("Token đã hết hạn", 401)
+        return {"username": row["username"], "role": row["role"]}
 
-    def _sign(self, payload: str) -> bytes:
-        return hmac.new(self._key, payload.encode("ascii"), hashlib.sha256).digest()
+    def revoke_token(self, token: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM tokens WHERE token_hash=?", (_hash_token(token),)
+            )
 
     # ------------------------------------------------------------------ #
-    # Phân quyền
+    # Phân quyền / audit
     # ------------------------------------------------------------------ #
-
     @staticmethod
-    def require(user: User, permission: str) -> None:
-        if not user.can(permission):
-            raise PermissionDenied(f"Role '{user.role}' lacks permission '{permission}'")
+    def has_permission(user: dict, permission: str) -> bool:
+        return permission in ROLE_PERMISSIONS.get(user.get("role", ""), set())
+
+    def require(self, user: dict, permission: str) -> None:
+        if not self.has_permission(user, permission):
+            raise AuthError("Không có quyền thực hiện thao tác này", 403)
+
+    def list_audit(self, limit: int = 100) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT timestamp, username, action, detail FROM audit "
+                "ORDER BY id DESC LIMIT ?",
+                (max(1, limit),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _audit(self, connection, username, action, detail) -> None:
+        connection.execute(
+            "INSERT INTO audit(timestamp, username, action, detail) VALUES (?, ?, ?, ?)",
+            (_now_iso(), username, action, detail),
+        )
+
+    def ensure_default_admin(self, password: str | None = None) -> tuple[str, str] | None:
+        """Tạo admin đầu tiên nếu database chưa có user nào.
+
+        Mật khẩu lấy từ tham số, biến môi trường ``TFTP_ADMIN_PASSWORD`` hoặc
+        mặc định ``admin``. Trả về ``(username, password)`` khi vừa tạo, ngược
+        lại trả ``None``. Caller nên cảnh báo người dùng đổi mật khẩu.
+        """
+        with self._connect() as connection:
+            count = connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        if count:
+            return None
+        username = "admin"
+        secret = password or os.environ.get("TFTP_ADMIN_PASSWORD", "admin")
+        self.create_user(username, secret, "admin")
+        return username, secret
+
+
+__all__ = [
+    "MIN_PASSWORD_LENGTH",
+    "ROLE_PERMISSIONS",
+    "AuthError",
+    "AuthManager",
+]

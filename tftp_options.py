@@ -1,131 +1,151 @@
-"""Thương lượng option TFTP (RFC 2347/2348/2349/7440) cho server và client."""
+"""Thương lượng option TFTP (RFC 2347/2348/2349/7440).
+
+Module này là nơi duy nhất quyết định option nào được chấp nhận và giá trị
+cuối cùng gửi trong OACK. ``tftp_packet.py`` chỉ đóng gói/giải mã, không tự
+thương lượng.
+
+Quy ước:
+    * Option lạ bị bỏ qua (RFC 2347).
+    * Giá trị sai định dạng/ngoài khoảng -> :class:`TFTPError` mã 8.
+    * ``windowsize`` trong OACK luôn <= giá trị client yêu cầu (RFC 7440).
+    * Khi không có OACK, hai bên dùng ``windowsize = 1`` (tương thích RFC 1350).
+"""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from tftp_config import PXE_MAX_BLKSIZE, ClientConfig, ServerConfig
+from tftp_config import (
+    DEFAULT_BLKSIZE,
+    DEFAULT_MAX_WINDOWSIZE,
+    DEFAULT_TIMEOUT,
+    DEFAULT_WINDOWSIZE,
+)
 from tftp_packet import (
-    BLOCK_SIZE,
     MAX_BLKSIZE,
+    MAX_TIMEOUT,
+    MIN_BLKSIZE,
+    MIN_TIMEOUT,
     TFTPError,
     validate_options,
 )
 
-__all__ = ["Negotiated", "build_request_options", "negotiate_server", "parse_oack"]
+MIN_WINDOWSIZE = 1
+MAX_WINDOWSIZE = 65535
+
+
+def _parse_int(name: str, value: str, low: int, high: int | None = None) -> int:
+    if not (value.isascii() and value.isdigit()):
+        raise TFTPError(8, f"Invalid {name}: {value!r}")
+    number = int(value)
+    if number < low or (high is not None and number > high):
+        bound = f"{low}..{high}" if high is not None else f">= {low}"
+        raise TFTPError(8, f"{name} must be {bound}")
+    return number
+
+
+def negotiate_options(
+    requested: dict[str, str],
+    *,
+    is_upload: bool = False,
+    file_size: int | None = None,
+    server_windowsize: int = DEFAULT_MAX_WINDOWSIZE,
+) -> dict[str, str]:
+    """Trả về dict option sẽ đưa vào OACK (rỗng nếu không có option hợp lệ).
+
+    Args:
+        requested: option client gửi trong RRQ/WRQ.
+        is_upload: ``True`` nếu là WRQ (client upload lên server).
+        file_size: kích thước thật của file, dùng để trả lời ``tsize`` cho RRQ.
+        server_windowsize: cửa sổ tối đa server chấp nhận.
+    """
+    server_windowsize = max(server_windowsize, MIN_WINDOWSIZE)
+
+    lowered = {str(key).lower(): str(value) for key, value in requested.items()}
+    # validate_options xử lý blksize/timeout/tsize và tự bỏ qua option lạ.
+    accepted = validate_options(
+        {key: value for key, value in lowered.items() if key != "windowsize"}
+    )
+
+    if "tsize" in accepted:
+        if is_upload:
+            # Client đã khai báo kích thước; server xác nhận lại.
+            accepted["tsize"] = lowered["tsize"]
+        else:
+            accepted["tsize"] = str(file_size if file_size is not None else 0)
+
+    if "windowsize" in lowered:
+        requested_window = _parse_int(
+            "windowsize", lowered["windowsize"], MIN_WINDOWSIZE, MAX_WINDOWSIZE
+        )
+        accepted["windowsize"] = str(min(requested_window, server_windowsize))
+
+    return accepted
 
 
 @dataclass(frozen=True)
-class Negotiated:
-    """Tham số truyền cuối cùng của một phiên."""
+class TransferOptions:
+    """Giá trị hiệu lực sau khi client nhận OACK (hoặc fallback)."""
 
-    blksize: int = BLOCK_SIZE
-    timeout: float = 3.0
-    windowsize: int = 1
-    tsize: int | None = None
-    oack: dict[str, str] = field(default_factory=dict)  # option server xác nhận
-
-
-def negotiate_server(
-    requested: Mapping[str, str],
-    config: ServerConfig,
-    *,
-    file_size: int | None = None,
-    is_write: bool = False,
-) -> Negotiated:
-    """Quyết định tham số phiên từ option client đề nghị.
-
-    * ``blksize``/``windowsize``: server được phép trả giá trị *nhỏ hơn* đề nghị.
-    * ``timeout``: phải đúng giá trị đề nghị, vượt trần thì từ chối (code 8).
-    * ``tsize``: RRQ trả kích thước file thật; WRQ phải <= ``max_file_size`` (code 3).
-    * Option lạ bị bỏ qua và không xuất hiện trong OACK.
-    """
-    opts = validate_options(requested)
-    blksize = config.blksize
-    timeout = float(config.timeout)
-    windowsize = config.windowsize
-    tsize: int | None = None
-    oack: dict[str, str] = {}
-
-    ceiling = min(config.max_blksize, MAX_BLKSIZE)
-    if config.pxe_mode:
-        ceiling = min(ceiling, PXE_MAX_BLKSIZE)
-
-    if "blksize" in opts:
-        blksize = min(int(opts["blksize"]), ceiling)
-        oack["blksize"] = str(blksize)
-    if "timeout" in opts:
-        seconds = int(opts["timeout"])
-        if seconds > config.max_timeout:
-            raise TFTPError(8, f"timeout must be <= {config.max_timeout}")
-        timeout = float(seconds)
-        oack["timeout"] = str(seconds)
-    if "windowsize" in opts:
-        windowsize = min(int(opts["windowsize"]), config.max_windowsize)
-        oack["windowsize"] = str(windowsize)
-    if "tsize" in opts:
-        if is_write:
-            tsize = int(opts["tsize"])
-            if tsize > config.max_file_size:
-                raise TFTPError(3, "File too large")
-            oack["tsize"] = str(tsize)
-        elif file_size is not None:
-            tsize = file_size
-            oack["tsize"] = str(file_size)
-
-    return Negotiated(blksize, timeout, windowsize, tsize, oack)
-
-
-def build_request_options(
-    config: ClientConfig, *, tsize: int | None = None
-) -> dict[str, str]:
-    """Option client đưa vào RRQ/WRQ (chỉ gửi những gì khác mặc định)."""
-    options: dict[str, str] = {}
-    if config.blksize != BLOCK_SIZE:
-        options["blksize"] = str(config.blksize)
-    if config.negotiate_timeout:
-        options["timeout"] = str(max(1, round(config.timeout)))
-    if config.windowsize > 1:
-        options["windowsize"] = str(config.windowsize)
-    if config.request_tsize and tsize is not None:
-        options["tsize"] = str(tsize)
-    return options
-
-
-def parse_oack(
-    requested: Mapping[str, str],
-    oack: Mapping[str, str],
-    *,
-    default_timeout: float = 3.0,
-) -> Negotiated:
-    """Kiểm tra OACK của server so với những gì client đã đề nghị.
-
-    Raise ``TFTPError(8)`` nếu server trả option chưa được hỏi, hoặc trả giá trị
-    lớn hơn đề nghị (blksize/windowsize), hoặc đổi giá trị timeout.
-    """
-    asked = {k.lower(): v for k, v in requested.items()}
-    for key in oack:
-        if key.lower() not in asked:
-            raise TFTPError(8, f"Unrequested option in OACK: {key}")
-    values = validate_options(oack)
-    blksize = BLOCK_SIZE
-    windowsize = 1
-    timeout = default_timeout
+    blksize: int = DEFAULT_BLKSIZE
+    timeout: float = DEFAULT_TIMEOUT
+    windowsize: int = DEFAULT_WINDOWSIZE
     tsize: int | None = None
 
-    if "blksize" in values:
-        blksize = int(values["blksize"])
-        if blksize > int(asked["blksize"]):
-            raise TFTPError(8, "Server raised blksize above request")
-    if "windowsize" in values:
-        windowsize = int(values["windowsize"])
-        if windowsize > int(asked["windowsize"]):
-            raise TFTPError(8, "Server raised windowsize above request")
-    if "timeout" in values:
-        if values["timeout"] != str(int(asked["timeout"])):
-            raise TFTPError(8, "Server changed timeout")
-        timeout = float(values["timeout"])
-    if "tsize" in values:
-        tsize = int(values["tsize"])
-    return Negotiated(blksize, timeout, windowsize, tsize, dict(values))
+    @classmethod
+    def from_oack(
+        cls,
+        options: dict[str, str],
+        *,
+        fallback_blksize: int = DEFAULT_BLKSIZE,
+        fallback_timeout: float = DEFAULT_TIMEOUT,
+    ) -> TransferOptions:
+        blksize = fallback_blksize
+        timeout = fallback_timeout
+        windowsize = DEFAULT_WINDOWSIZE
+        tsize: int | None = None
+
+        if "blksize" in options:
+            blksize = _parse_int(
+                "blksize", str(options["blksize"]), MIN_BLKSIZE, MAX_BLKSIZE
+            )
+        if "timeout" in options:
+            timeout = float(
+                _parse_int("timeout", str(options["timeout"]), MIN_TIMEOUT, MAX_TIMEOUT)
+            )
+        if "windowsize" in options:
+            windowsize = _parse_int(
+                "windowsize", str(options["windowsize"]), MIN_WINDOWSIZE, MAX_WINDOWSIZE
+            )
+        if "tsize" in options:
+            tsize = _parse_int("tsize", str(options["tsize"]), 0)
+
+        return cls(
+            blksize=blksize,
+            timeout=timeout,
+            windowsize=windowsize,
+            tsize=tsize,
+        )
+
+    def as_request_options(self, *, upload: bool, file_size: int | None = None) -> dict[str, str]:
+        """Tạo option gửi trong RRQ/WRQ từ cấu hình client."""
+        options: dict[str, str] = {}
+        if self.blksize != DEFAULT_BLKSIZE:
+            options["blksize"] = str(self.blksize)
+        if self.timeout >= 1:
+            options["timeout"] = str(int(self.timeout))
+        if upload and file_size is not None:
+            options["tsize"] = str(file_size)
+        else:
+            options["tsize"] = "0"
+        if self.windowsize != DEFAULT_WINDOWSIZE:
+            options["windowsize"] = str(self.windowsize)
+        return options
+
+
+__all__ = [
+    "MAX_WINDOWSIZE",
+    "MIN_WINDOWSIZE",
+    "TransferOptions",
+    "negotiate_options",
+]
