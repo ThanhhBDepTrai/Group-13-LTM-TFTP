@@ -1,285 +1,105 @@
-"""Thống kê hoạt động server, lưu lịch sử bằng SQLite.
+"""Metrics Service: thống kê hoạt động của TFTP server trong bộ nhớ.
 
-``TransferEvent`` là hợp đồng dữ liệu tối thiểu giữa server, metrics, Admin API
-và GUI. Dashboard không truy vấn trực tiếp database của server; nó gọi Admin
-API, API gọi :class:`MetricsCollector`.
+Thread-safe, không phụ thuộc thư viện ngoài. ``snapshot()`` trả dict cho API JSON,
+``to_prometheus()`` trả văn bản theo định dạng Prometheus.
 """
 
 from __future__ import annotations
 
-import sqlite3
 import threading
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
+import time
+from collections import Counter, deque
+from collections.abc import Callable
+from typing import Any
+
+__all__ = ["MetricsService"]
 
 
-@dataclass(frozen=True)
-class TransferEvent:
-    timestamp: str
-    client_ip: str
-    filename: str
-    direction: str  # "upload" | "download"
-    bytes_total: int
-    duration: float
-    retries: int
-    timeouts: int
-    status: str  # "success" | "failed" | "cancelled"
-    error: str | None = None
+class MetricsService:
+    def __init__(self, *, recent_window: int = 200, clock: Callable[[], float] = time.time):
+        self._clock = clock
+        self._lock = threading.Lock()
+        self.started_at = clock()
+        self._transfers: Counter[str] = Counter()  # "ok", "failed", "rrq", "wrq"
+        self._bytes: Counter[str] = Counter()  # "read", "written"
+        self._retransmits = 0
+        self._weighted_seconds = 0.0
+        self._ok_bytes = 0
+        self._files: Counter[str] = Counter()
+        self._errors: Counter[str] = Counter()
+        self._recent: deque[tuple[float, int]] = deque(maxlen=recent_window)
+        self._active_provider: Callable[[], int] | None = None
 
-    def to_dict(self) -> dict:
-        return {
-            "timestamp": self.timestamp,
-            "client_ip": self.client_ip,
-            "filename": self.filename,
-            "direction": self.direction,
-            "bytes_total": self.bytes_total,
-            "duration": round(self.duration, 6),
-            "retries": self.retries,
-            "timeouts": self.timeouts,
-            "status": self.status,
-            "error": self.error,
-        }
+    def set_active_provider(self, provider: Callable[[], int]) -> None:
+        """Hàm trả về số phiên đang chạy (ví dụ ``lambda: server.active_sessions``)."""
+        self._active_provider = provider
 
+    def record_transfer(self, record: Any) -> None:
+        """Nhận ``TransferRecord`` hoặc dict cùng trường."""
+        get = record.get if isinstance(record, dict) else lambda k, d=None: getattr(record, k, d)
+        op = str(get("op", "")).upper()
+        ok = get("status") == "ok"
+        size = int(get("bytes", 0) or 0)
+        with self._lock:
+            self._transfers["ok" if ok else "failed"] += 1
+            self._transfers[op.lower()] += 1
+            self._retransmits += int(get("retransmits", 0) or 0)
+            if ok:
+                self._bytes["read" if op == "RRQ" else "written"] += size
+                self._ok_bytes += size
+                self._weighted_seconds += float(get("duration", 0) or 0)
+                self._files[str(get("filename", ""))] += 1
+                self._recent.append((self._clock(), size))
+            else:
+                reason = str(get("error", "") or "unknown")
+                self._errors[reason.split(":")[0][:40]] += 1
 
-def _now_iso() -> str:
-    return datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
-
-
-class MetricsCollector:
-    def __init__(self, db_path: str | Path | None = None, *, max_recent: int = 500):
-        self.db_path = str(db_path) if db_path else None
-        self.max_recent = max(1, max_recent)
-        self._lock = threading.RLock()
-        self._active_clients = 0
-        self._recent: list[TransferEvent] = []
-        self._memory = {
-            "total_transfers": 0,
-            "successful": 0,
-            "failed": 0,
-            "uploads": 0,
-            "downloads": 0,
-            "bytes_upload": 0,
-            "bytes_download": 0,
-            "total_duration": 0.0,
-            "timeouts": 0,
-            "retries": 0,
-        }
-        if self.db_path:
-            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-            self._initialize_db()
-
-    def _connect(self):
-        connection = sqlite3.connect(self.db_path, timeout=5)
-        connection.row_factory = sqlite3.Row
-        return connection
-
-    def _initialize_db(self) -> None:
-        with self._connect() as connection:
-            connection.executescript(
-                """
-                PRAGMA journal_mode = WAL;
-                CREATE TABLE IF NOT EXISTS transfers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    client_ip TEXT NOT NULL,
-                    filename TEXT NOT NULL,
-                    direction TEXT NOT NULL,
-                    bytes_total INTEGER NOT NULL,
-                    duration REAL NOT NULL,
-                    retries INTEGER NOT NULL,
-                    timeouts INTEGER NOT NULL,
-                    status TEXT NOT NULL,
-                    error TEXT
-                );
-                CREATE INDEX IF NOT EXISTS idx_transfers_time ON transfers(id);
-                """
+    def snapshot(self) -> dict[str, Any]:
+        now = self._clock()
+        with self._lock:
+            total = self._transfers["ok"] + self._transfers["failed"]
+            average = (
+                self._ok_bytes * 8 / self._weighted_seconds / 1e6 if self._weighted_seconds else 0.0
             )
+            last_minute = sum(size for ts, size in self._recent if now - ts <= 60)
+            data = {
+                "uptime_seconds": round(now - self.started_at, 3),
+                "transfers": {
+                    "total": total,
+                    "ok": self._transfers["ok"],
+                    "failed": self._transfers["failed"],
+                    "read": self._transfers["rrq"],
+                    "write": self._transfers["wrq"],
+                    "success_rate": round(self._transfers["ok"] / total, 4) if total else 1.0,
+                },
+                "bytes": {
+                    "read": self._bytes["read"],
+                    "written": self._bytes["written"],
+                    "total": self._bytes["read"] + self._bytes["written"],
+                    "last_minute": last_minute,
+                },
+                "retransmits": self._retransmits,
+                "avg_throughput_mbps": round(average, 3),
+                "top_files": [{"filename": n, "count": c} for n, c in self._files.most_common(5)],
+                "errors": dict(self._errors.most_common(10)),
+            }
+        data["active_sessions"] = self._active_provider() if self._active_provider else 0
+        return data
 
-    # ------------------------------------------------------------------ #
-    # Phiên đang hoạt động
-    # ------------------------------------------------------------------ #
-    def start_session(self) -> None:
-        with self._lock:
-            self._active_clients += 1
-
-    def end_session(self) -> None:
-        with self._lock:
-            self._active_clients = max(0, self._active_clients - 1)
-
-    @property
-    def active_clients(self) -> int:
-        with self._lock:
-            return self._active_clients
-
-    # ------------------------------------------------------------------ #
-    # Ghi nhận
-    # ------------------------------------------------------------------ #
-    def record_transfer(self, event: TransferEvent) -> None:
-        with self._lock:
-            self._memory["total_transfers"] += 1
-            if event.status == "success":
-                self._memory["successful"] += 1
-            else:
-                self._memory["failed"] += 1
-            if event.direction == "upload":
-                self._memory["uploads"] += 1
-                self._memory["bytes_upload"] += event.bytes_total
-            else:
-                self._memory["downloads"] += 1
-                self._memory["bytes_download"] += event.bytes_total
-            self._memory["total_duration"] += max(event.duration, 0)
-            self._memory["timeouts"] += event.timeouts
-            self._memory["retries"] += event.retries
-
-            self._recent.append(event)
-            if len(self._recent) > self.max_recent:
-                del self._recent[: len(self._recent) - self.max_recent]
-
-            if self.db_path:
-                try:
-                    with self._connect() as connection:
-                        connection.execute(
-                            "INSERT INTO transfers(timestamp, client_ip, filename, "
-                            "direction, bytes_total, duration, retries, timeouts, "
-                            "status, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            (
-                                event.timestamp,
-                                event.client_ip,
-                                event.filename,
-                                event.direction,
-                                event.bytes_total,
-                                event.duration,
-                                event.retries,
-                                event.timeouts,
-                                event.status,
-                                event.error,
-                            ),
-                        )
-                except sqlite3.Error:
-                    # Dashboard không được làm hỏng phiên truyền file.
-                    pass
-
-    def record(
-        self,
-        *,
-        client_ip: str,
-        filename: str,
-        direction: str,
-        bytes_total: int,
-        duration: float,
-        retries: int = 0,
-        timeouts: int = 0,
-        status: str = "success",
-        error: str | None = None,
-    ) -> TransferEvent:
-        event = TransferEvent(
-            timestamp=_now_iso(),
-            client_ip=client_ip,
-            filename=filename,
-            direction=direction,
-            bytes_total=bytes_total,
-            duration=duration,
-            retries=retries,
-            timeouts=timeouts,
-            status=status,
-            error=error,
-        )
-        self.record_transfer(event)
-        return event
-
-    # ------------------------------------------------------------------ #
-    # Truy vấn
-    # ------------------------------------------------------------------ #
-    def snapshot(self) -> dict:
-        with self._lock:
-            active = self._active_clients
-            if self.db_path:
-                try:
-                    with self._connect() as connection:
-                        row = connection.execute(
-                            """
-                            SELECT COUNT(*) AS total,
-                                   COALESCE(SUM(status='success'), 0) AS successful,
-                                   COALESCE(SUM(status!='success'), 0) AS failed,
-                                   COALESCE(SUM(direction='upload'), 0) AS uploads,
-                                   COALESCE(SUM(direction='download'), 0) AS downloads,
-                                   COALESCE(SUM(CASE WHEN direction='upload'
-                                        THEN bytes_total ELSE 0 END), 0) AS bytes_upload,
-                                   COALESCE(SUM(CASE WHEN direction='download'
-                                        THEN bytes_total ELSE 0 END), 0) AS bytes_download,
-                                   COALESCE(SUM(duration), 0) AS total_duration,
-                                   COALESCE(SUM(timeouts), 0) AS timeouts,
-                                   COALESCE(SUM(retries), 0) AS retries
-                            FROM transfers
-                            """
-                        ).fetchone()
-                    data = dict(row)
-                except sqlite3.Error:
-                    data = dict(self._memory)
-                    data["total"] = data.get("total_transfers", 0)
-            else:
-                data = {
-                    "total": self._memory["total_transfers"],
-                    "successful": self._memory["successful"],
-                    "failed": self._memory["failed"],
-                    "uploads": self._memory["uploads"],
-                    "downloads": self._memory["downloads"],
-                    "bytes_upload": self._memory["bytes_upload"],
-                    "bytes_download": self._memory["bytes_download"],
-                    "total_duration": self._memory["total_duration"],
-                    "timeouts": self._memory["timeouts"],
-                    "retries": self._memory["retries"],
-                }
-
-        total_duration = float(data.get("total_duration") or 0)
-        total_bytes = data["bytes_upload"] + data["bytes_download"]
-        return {
-            "active_clients": active,
-            "total_transfers": data["total"],
-            "successful": data["successful"],
-            "failed": data["failed"],
-            "uploads": data["uploads"],
-            "downloads": data["downloads"],
-            "bytes_upload": data["bytes_upload"],
-            "bytes_download": data["bytes_download"],
-            "total_bytes": total_bytes,
-            "avg_speed_bytes_per_second": (
-                total_bytes / total_duration if total_duration > 0 else 0
-            ),
-            "timeouts": data["timeouts"],
-            "retries": data["retries"],
-        }
-
-    def recent_transfers(self, limit: int = 50) -> list[dict]:
-        limit = max(1, limit)
-        if self.db_path:
-            try:
-                with self._connect() as connection:
-                    rows = connection.execute(
-                        "SELECT timestamp, client_ip, filename, direction, "
-                        "bytes_total, duration, retries, timeouts, status, error "
-                        "FROM transfers ORDER BY id DESC LIMIT ?",
-                        (limit,),
-                    ).fetchall()
-                return [dict(row) for row in rows]
-            except sqlite3.Error:
-                pass
-        with self._lock:
-            items = list(self._recent)[-limit:]
-        return [item.to_dict() for item in reversed(items)]
-
-    def reset(self) -> None:
-        with self._lock:
-            self._recent.clear()
-            for key in self._memory:
-                self._memory[key] = 0
-            if self.db_path:
-                try:
-                    with self._connect() as connection:
-                        connection.execute("DELETE FROM transfers")
-                except sqlite3.Error:
-                    pass
-
-
-__all__ = ["MetricsCollector", "TransferEvent"]
+    def to_prometheus(self) -> str:
+        snap = self.snapshot()
+        lines = [
+            "# TYPE tftp_transfers_total counter",
+            f'tftp_transfers_total{{status="ok"}} {snap["transfers"]["ok"]}',
+            f'tftp_transfers_total{{status="failed"}} {snap["transfers"]["failed"]}',
+            "# TYPE tftp_bytes_total counter",
+            f'tftp_bytes_total{{direction="read"}} {snap["bytes"]["read"]}',
+            f'tftp_bytes_total{{direction="written"}} {snap["bytes"]["written"]}',
+            "# TYPE tftp_retransmits_total counter",
+            f'tftp_retransmits_total {snap["retransmits"]}',
+            "# TYPE tftp_active_sessions gauge",
+            f'tftp_active_sessions {snap["active_sessions"]}',
+            "# TYPE tftp_uptime_seconds gauge",
+            f'tftp_uptime_seconds {snap["uptime_seconds"]}',
+        ]
+        return "\n".join(lines) + "\n"
