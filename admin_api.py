@@ -19,8 +19,6 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
 from auth import AuthError, AuthManager
-from enterprise import api_routes as enterprise_routes
-from enterprise.errors import EnterpriseError
 from metrics import MetricsCollector
 from packet_trace import PacketTracer
 from pxe_config import PxeError, PxeManager
@@ -139,21 +137,10 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         if not header.startswith("Bearer "):
             raise AuthError("Thiếu hoặc sai Authorization header", 401)
         token = header[len("Bearer ") :].strip()
-        app = self.server.app
-        try:
-            user = app.auth.validate_token(token)
-            if permission:
-                app.auth.require(user, permission)
-            return user, token
-        except AuthError:
-            # Enterprise sessions are also accepted by the legacy TFTP Pro
-            # endpoints so the existing tabs can use the new account system.
-            if app.enterprise is None:
-                raise
-            user = app.enterprise.authenticate(token)
-            if permission:
-                app.enterprise.permissions.require(user, permission)
-            return user, token
+        user = self.server.app.auth.validate_token(token)
+        if permission:
+            self.server.app.auth.require(user, permission)
+        return user, token
 
     # ------------------------------------------------------------------ #
     # Dispatch
@@ -176,8 +163,6 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         except AdminAPIError as exc:
             self._send_json(exc.status, {"error": exc.message})
         except AuthError as exc:
-            self._send_json(exc.status, {"error": exc.message})
-        except EnterpriseError as exc:
             self._send_json(exc.status, {"error": exc.message})
         except StorageError as exc:
             self._send_json(exc.status, {"error": exc.message})
@@ -202,17 +187,20 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/api/health" and method == "GET":
             payload = {"status": "ok", "version": VERSION}
-            if app.enterprise is not None:
+            if getattr(app, "enterprise", None) is not None:
                 cfg = app.enterprise.servers.get()
                 if cfg is not None:
                     payload["server_id"] = cfg.server_id
             self._send_json(200, payload)
             return
 
-        if app.enterprise is not None and enterprise_routes.handle(
-            self, app.enterprise, method, path, query
-        ):
-            return
+        if app.enterprise is not None:
+            try:
+                from enterprise import api_routes as enterprise_routes
+                if enterprise_routes.handle(self, app.enterprise, method, path, query):
+                    return
+            except Exception:
+                pass
 
         if path == "/api/auth/login" and method == "POST":
             body = self._json_body()
@@ -223,15 +211,8 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/auth/logout" and method == "POST":
-            user, token = self._authenticate()
-            if app.enterprise is not None:
-                try:
-                    app.enterprise.authenticate(token)
-                    app.enterprise.accounts.logout(token)
-                except EnterpriseError:
-                    app.auth.revoke_token(token)
-            else:
-                app.auth.revoke_token(token)
+            _user, token = self._authenticate()
+            app.auth.revoke_token(token)
             self._send_json(200, {"status": "logged_out"})
             return
 
@@ -544,9 +525,6 @@ def main(argv=None) -> int:
     parser.add_argument("--db", default=DEFAULT_ADMIN_DB)
     parser.add_argument("--metrics-db", default=None)
     parser.add_argument("--pxe-profiles", default=DEFAULT_PXE_PROFILES)
-    parser.add_argument("--enterprise-db", default=None,
-                        help="Bật Enterprise File Manager với database này")
-    parser.add_argument("--enterprise-root", default="storage/company_files")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
 
@@ -568,14 +546,7 @@ def main(argv=None) -> int:
     metrics = MetricsCollector(args.metrics_db or Path(args.db).with_suffix(".metrics.db"))
     tracer = PacketTracer()
     pxe = PxeManager(storage, args.pxe_profiles)
-    enterprise = None
-    if args.enterprise_db:
-        from enterprise.service import EnterpriseService
-
-        enterprise = EnterpriseService(args.enterprise_db, args.enterprise_root)
-    api = AdminAPIServer(
-        storage, auth, metrics=metrics, tracer=tracer, pxe=pxe, enterprise=enterprise
-    )
+    api = AdminAPIServer(storage, auth, metrics=metrics, tracer=tracer, pxe=pxe)
     logger.info("Admin API: %s (root=%s)", api.url, storage.root)
     try:
         api.start(background=False)
