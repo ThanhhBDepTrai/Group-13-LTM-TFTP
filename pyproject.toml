@@ -21,9 +21,15 @@ tftp-client = "tftp_client:main"
 tftp-gui = "tftp_gui:main"
 tftp-pro = "tftp_pro:main"
 tftp-admin-api = "admin_api:main"
+efm = "enterprise.cli:main"
+efm-app = "efm_app:main"
+
+[tool.setuptools.packages.find]
+include = ["enterprise*", "database*", "client*"]
 
 [tool.setuptools]
 py-modules = [
+    "efm_app",
     "admin_api",
     "admin_client",
     "auth",

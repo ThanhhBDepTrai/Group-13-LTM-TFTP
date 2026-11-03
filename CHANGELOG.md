@@ -15,3 +15,8 @@
 - No encryption or authentication; use in trusted LAN only
 - No resume support
 - IPv4 only
+
+## Unreleased
+- Thêm Enterprise File Manager: multi-Server (Server ID, join code, registry), tài khoản/phiên
+  7 vai trò, nhân sự/phòng ban/chức vụ, ACL file, cấp quyền truyền TFTP, task, audit.
+- Admin API: route `/api/ent/*` bật bằng `--enterprise-db`; `/api/health` trả thêm `server_id`.

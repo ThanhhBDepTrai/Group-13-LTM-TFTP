@@ -1,0 +1,57 @@
+========================================
+Enterprise File Manager - Hướng dẫn chạy
+========================================
+
+1) Cài Python 3.10+ (Windows/Linux/macOS)
+
+2) Mở terminal tại thư mục project này
+
+3) (Khuyến nghị) Tạo môi trường ảo:
+   python -m venv .venv
+   # Windows:
+   .venv\Scripts\activate
+   # Linux/macOS:
+   source .venv/bin/activate
+
+4) Cài dependencies (nếu có):
+   pip install -e ".[dev]"
+   # hoặc nếu không dùng pyproject:
+   # không bắt buộc thư viện ngoài để chạy GUI cơ bản
+
+5) Chạy Server (TFTP + Admin API) - cửa sổ 1:
+   set TFTP_ADMIN_PASSWORD=MatKhauManh123!
+   python tftp_pro.py
+
+   (Linux/macOS)
+   export TFTP_ADMIN_PASSWORD=MatKhauManh123!
+   python tftp_pro.py
+
+6) Chạy GUI - cửa sổ 2:
+   python tftp_gui.py
+
+========================================
+Luồng sử dụng GUI
+========================================
+
+* CREATE SERVER
+  Welcome -> Create Server -> điền Workspace -> NEXT
+  -> Admin Setup (tạo SUPER_ADMIN) -> CREATE WORKSPACE
+  -> vào giao diện chính, trạng thái: Đăng nhập SUPER_ADMIN
+  -> Tab "Người dùng": tạo tài khoản cho nhân viên
+  (Lưu ý: Create Workspace hiện lưu tạm trên client;
+   để quản trị user/file thật cần Server đang chạy và đăng nhập Admin API)
+
+* JOIN SERVER
+  Welcome -> Join Server
+  -> nhập Server Address (vd: http://127.0.0.1:6971)
+  -> Username / Password (tài khoản trên Admin API)
+  -> LOGIN
+  -> vào giao diện chính theo quyền
+
+* Tạo nick cho người khác
+  Sau khi đăng nhập admin -> tab "Người dùng" -> Tạo
+
+Mặc định:
+  TFTP UDP: 0.0.0.0:6969
+  Admin API: http://127.0.0.1:6971
+  Admin mặc định: admin / (mật khẩu từ biến môi trường TFTP_ADMIN_PASSWORD)

@@ -1,0 +1,9 @@
+[Unit]
+Description=EFM Admin API
+After=network.target
+[Service]
+WorkingDirectory=/opt/efm
+ExecStart=/opt/efm/.venv/bin/python admin_api.py --host 0.0.0.0 --enterprise-db database/tftp_admin.db
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target

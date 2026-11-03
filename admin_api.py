@@ -186,8 +186,21 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         path, query = self._query(self.path)
 
         if path == "/api/health" and method == "GET":
-            self._send_json(200, {"status": "ok", "version": VERSION})
+            payload = {"status": "ok", "version": VERSION}
+            if getattr(app, "enterprise", None) is not None:
+                cfg = app.enterprise.servers.get()
+                if cfg is not None:
+                    payload["server_id"] = cfg.server_id
+            self._send_json(200, payload)
             return
+
+        if app.enterprise is not None:
+            try:
+                from enterprise import api_routes as enterprise_routes
+                if enterprise_routes.handle(self, app.enterprise, method, path, query):
+                    return
+            except Exception:
+                pass
 
         if path == "/api/auth/login" and method == "POST":
             body = self._json_body()
@@ -462,6 +475,7 @@ class AdminAPIServer:
         metrics: MetricsCollector | None = None,
         tracer: PacketTracer | None = None,
         pxe=None,
+        enterprise=None,
         host: str = DEFAULT_ADMIN_HOST,
         port: int = DEFAULT_ADMIN_PORT,
         max_body: int = DEFAULT_MAX_ADMIN_BODY,
@@ -471,6 +485,7 @@ class AdminAPIServer:
         self.metrics = metrics
         self.tracer = tracer
         self.pxe = pxe
+        self.enterprise = enterprise
         self.max_body = max_body
         self.httpd = _AdminHTTPServer((host, port), _AdminRequestHandler, self)
         self.host, self.port = self.httpd.server_address[:2]
