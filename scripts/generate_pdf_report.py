@@ -269,8 +269,8 @@ def build() -> Path:
         "Thông tin nhanh",
         [
             "Kho mã nguồn: github.com/ThanhhBDepTrai/Group-13-LTM-TFTP",
-            "Nhánh chính: main  ·  Commit hợp nhất: 9683811",
-            "Kiểm thử: 255/255 test PASSED (16 tệp, 22,26 giây)",
+            "Nhánh chính: main  ·  Commit mới nhất: 0864f4d",
+            "Kiểm thử: 257/257 test PASSED (16 tệp, 22,59 giây)",
             "Môi trường: Python 3.15.2 trên Windows x64",
         ],
     )
@@ -289,7 +289,7 @@ def build() -> Path:
         "Ba nhánh phát triển đã được hợp nhất thành công vào main. Nhánh tftp_engine_upgrade nâng cấp "
         "lõi truyền tải; backend-developer bổ sung quản lý tệp, xác thực, đo lường, SHA-256 và PXE; "
         "efm-enterprise mang đến tài khoản, nhân viên, phân quyền tệp, đa máy chủ và giao diện quản "
-        "trị mới. Toàn bộ 255 bài kiểm thử đều đạt.",
+        "quản trị mới. Toàn bộ 257 bài kiểm thử đều đạt.",
     )
     sub(pdf, "Thay đổi nổi bật")
     for item in [
@@ -306,7 +306,8 @@ def build() -> Path:
     section(pdf, "2. Kết quả kiểm thử")
     para(
         pdf,
-        "Kết quả thu được bằng lệnh pytest trên toàn bộ thư mục tests/ tại nhánh main sau khi hợp nhất.",
+        "Kết quả thu được bằng lệnh pytest trên toàn bộ thư mục tests/ tại nhánh main sau khi hợp nhất. "
+        "Hai bài mới kiểm thử phân quyền theo phòng ban và quy tắc ưu tiên đường dẫn cụ thể.",
     )
     test_rows = [
         ["test_packet.py", "135", "PASSED"],
@@ -314,7 +315,7 @@ def build() -> Path:
         ["test_windowsize.py", "21", "PASSED"],
         ["test_auth.py", "14", "PASSED"],
         ["test_admin_api.py", "13", "PASSED"],
-        ["test_enterprise.py", "13", "PASSED"],
+        ["test_enterprise.py", "15", "PASSED"],
         ["test_server.py", "8", "PASSED"],
         ["test_pxe.py", "7", "PASSED"],
         ["test_config.py", "6", "PASSED"],
@@ -325,7 +326,7 @@ def build() -> Path:
         ["test_cancel.py", "1", "PASSED"],
         ["test_client.py", "1", "PASSED"],
         ["test_integration.py", "1", "PASSED"],
-        ["TỔNG CỘNG", "255", "TẤT CẢ PASSED"],
+        ["TỔNG CỘNG", "257", "TẤT CẢ PASSED"],
     ]
     table(
         pdf,
@@ -455,7 +456,7 @@ def build() -> Path:
             ["database/", "Lưu trữ dữ liệu và dữ liệu mẫu."],
             ["deployment/", "Script cài đặt Linux, systemd, tường lửa, sao lưu."],
             ["docs/, scripts/", "Tài liệu kỹ thuật, benchmark, đóng gói và tạo báo cáo."],
-            ["tests/", "16 tệp kiểm thử với 255 bài."],
+            ["tests/", "16 tệp kiểm thử với 257 bài."],
         ],
         [62, 118],
     )
@@ -561,38 +562,62 @@ def build() -> Path:
     para(
         pdf,
         "Các đầu việc dưới đây được tổng hợp từ kết quả rà soát mã nguồn và tài liệu, ưu tiên theo mức "
-        "độ ảnh hưởng tới việc bàn giao và vận hành thực tế.",
+        "độ ảnh hưởng tới việc bàn giao và vận hành thực tế. Cột trạng thái cho biết việc nào đã được "
+        "xử lý trong đợt cập nhật gần nhất.",
     )
     table(
         pdf,
-        ["Công việc", "Ưu tiên", "Ghi chú"],
+        ["Công việc", "Ưu tiên", "Trạng thái", "Ghi chú"],
         [
-            ["Kiểm thử tải với nhiều máy khách thật", "Cao", "Đo thông lượng, timeout và retransmission ở 20–50 phiên đồng thời."],
-            ["Hoàn thiện phân quyền Enterprise", "Cao", "Bổ sung ACL theo phòng ban và kiểm thử các tình huống bị từ chối."],
-            ["Kiểm thử giao diện theo kịch bản", "Trung bình", "Lập checklist cho 7 tab và ba luồng Workspace/Join/Login."],
-            ["Cập nhật tài liệu phân công", "Trung bình", "Đồng bộ docs/phan_chia_cong_viec.docx với tiến độ hợp nhất."],
-            ["Đóng gói bản cài 1.1.0", "Trung bình", "Sửa scripts/build_exe.ps1 còn ghi tên bản 1.0.0."],
-            ["Dọn dẹp kho mã nguồn", "Thấp", "Bổ sung tftp_admin.db, *.metrics.db, pxe_profiles.json vào .gitignore."],
-            ["Sửa đường dẫn cứng trong script", "Thấp", "scripts/make_docx.py còn trỏ tới ổ E:\\VSCode\\TFTP-Pro."],
+            ["Kiểm thử tải với nhiều máy khách thật", "Cao", "Chưa làm", "Đo thông lượng, timeout và truyền lại ở 20–50 phiên đồng thời."],
+            ["Hoàn thiện phân quyền Enterprise", "Cao", "Đã bổ sung test", "Thêm 2 test ACL: theo phòng ban và quy tắc đường dẫn cụ thể thắng."],
+            ["Kiểm thử giao diện theo kịch bản", "Trung bình", "Chưa làm", "Lập checklist cho 7 tab và ba luồng Workspace/Join/Login."],
+            ["Cập nhật tài liệu phân công", "Trung bình", "Chưa làm", "Đồng bộ docs/phan_chia_cong_viec.docx với tiến độ hợp nhất."],
+            ["Đóng gói bản cài 1.1.0", "Trung bình", "Đã sửa tên bản", "build_exe.ps1 đã dùng TFTPPro-v1.1.0; còn chạy build thực tế."],
+            ["Dọn dẹp kho mã nguồn", "Thấp", "Đã xong", ".gitignore đã bổ sung db, metrics, pxe_profiles.json, server_storage."],
+            ["Sửa đường dẫn cứng trong script", "Thấp", "Đã xong", "make_docx.py dùng đường dẫn tương đối theo vị trí kho mã nguồn."],
         ],
-        [60, 22, 98],
-        aligns=["L", "C", "L"],
+        [50, 18, 30, 82],
+        aligns=["L", "C", "C", "L"],
     )
 
-    # ---------------- 10. Kết luận ----------------
-    section(pdf, "10. Kết luận")
+    # ---------------- 10. Nhật ký cập nhật ----------------
+    section(pdf, "10. Nhật ký cập nhật")
     para(
         pdf,
-        "Dự án TFTP Pro đã hoàn thiện ở mức có thể bàn giao: ba nhánh được hợp nhất, 255 bài kiểm thử "
-        "đều đạt, giao diện được nâng cấp theo hướng doanh nghiệp và tài liệu kỹ thuật đầy đủ. Các "
-        "bước tiếp theo nên tập trung vào kiểm thử trên mạng thật nhiều máy khách, bổ sung phân quyền "
-        "chi tiết hơn cho Enterprise và cập nhật tài liệu phân công công việc theo tiến độ hiện tại.",
+        "Các việc nêu trên được thực hiện trên một nhánh riêng, kiểm thử đầy đủ rồi mới hợp nhất vào main "
+        "nhằm giữ nhánh chính luôn chạy được.",
+    )
+    table(
+        pdf,
+        ["Hạng mục", "Kết quả"],
+        [
+            ["Nhánh làm việc", "chore/cleanup-improvements, hợp nhất fast-forward vào main"],
+            ["Commit", "0864f4d — chore: ignore runtime data, fix build version/paths, add ACL tests"],
+            ["Tệp thay đổi", ".gitignore, scripts/build_exe.ps1, scripts/make_docx.py, tests/test_enterprise.py"],
+            ["Kiểm thử", "257/257 PASSED (thêm 2 test ACL, không có test nào hỏng)"],
+            ["Tài liệu", "Báo cáo PDF này và script tạo PDF đã được đưa vào kho mã nguồn"],
+            ["Trạng thái", "Đã push lên origin/main"],
+        ],
+        [40, 140],
+    )
+
+    # ---------------- 11. Kết luận ----------------
+    pdf.add_page()
+    section(pdf, "11. Kết luận")
+    para(
+        pdf,
+        "Dự án TFTP Pro đã hoàn thiện ở mức có thể bàn giao: ba nhánh được hợp nhất, 257 bài kiểm thử "
+        "đều đạt, giao diện được nâng cấp theo hướng doanh nghiệp và tài liệu kỹ thuật đầy đủ. Đợt cập "
+        "nhật gần nhất đã xử lý các việc dọn dẹp ưu tiên thấp và bổ sung kiểm thử phân quyền. Các "
+        "bước tiếp theo nên tập trung vào kiểm thử trên mạng thật nhiều máy khách, kiểm thử giao diện "
+        "và cập nhật tài liệu phân công công việc theo tiến độ hiện tại.",
     )
     info_box(
         pdf,
         "Kết quả chính",
         [
-            "255/255 bài kiểm thử đạt trên nhánh main.",
+            "257/257 bài kiểm thử đạt trên nhánh main.",
             "Giao diện tăng từ 6 lên 7 tab, thêm luồng Workspace, Join Server và đăng nhập.",
             "Mô-đun Enterprise, đa máy chủ và script triển khai đã sẵn sàng.",
         ],
