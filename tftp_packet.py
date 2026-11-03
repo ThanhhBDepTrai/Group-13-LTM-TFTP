@@ -1,4 +1,4 @@
-"""TFTP packet encoding/decoding for RFC 1350 (+ RFC 2347/2348/2349 options).
+"""TFTP packet encoding/decoding for RFC 1350 (+ RFC 2347/2348/2349/7440 options).
 
 Module này chỉ làm một việc: chuyển đổi giữa ``bytes`` trên đường truyền và
 đối tượng :class:`Packet`. Không có socket, không có I/O, không có ``print``.
@@ -16,7 +16,7 @@ import struct
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     "BLOCK_SIZE",
@@ -25,8 +25,10 @@ __all__ = [
     "MAX_DATA_SIZE",
     "MAX_PACKET_SIZE",
     "MAX_TIMEOUT",
+    "MAX_WINDOWSIZE",
     "MIN_BLKSIZE",
     "MIN_TIMEOUT",
+    "MIN_WINDOWSIZE",
     "OP_ACK",
     "OP_DATA",
     "OP_ERROR",
@@ -56,6 +58,8 @@ MAX_BLKSIZE = MAX_DATA_SIZE
 MAX_PACKET_SIZE = 4 + MAX_DATA_SIZE  # đủ lớn để recvfrom() mọi gói hợp lệ
 MIN_TIMEOUT = 1  # RFC 2349 (giây)
 MAX_TIMEOUT = 255
+MIN_WINDOWSIZE = 1  # RFC 7440
+MAX_WINDOWSIZE = 65535
 
 OP_RRQ = 1
 OP_WRQ = 2
@@ -314,9 +318,9 @@ def validate_options(options: Mapping[str, str]) -> dict[str, str]:
     * ``blksize``: 8..65464 (RFC 2348)
     * ``timeout``: 1..255 giây (RFC 2349)
     * ``tsize``: số nguyên >= 0 (RFC 2349)
-    * ``windowsize``: 1..65535 block (RFC 7440)
+    * ``windowsize``: 1..65535 block mỗi cửa sổ (RFC 7440)
 
-    Option không nhận diện (ví dụ ``foo``) bị bỏ qua - đúng RFC 2347:
+    Option không nhận diện bị bỏ qua - đúng RFC 2347:
     bên nhận được phép lờ đi option lạ. Giá trị sai ném ``TFTPError(8)``.
     """
     accepted: dict[str, str] = {}
@@ -329,5 +333,5 @@ def validate_options(options: Mapping[str, str]) -> dict[str, str]:
         elif name == "tsize":
             accepted[name] = str(_parse_int(name, value, 0, None))
         elif name == "windowsize":
-            accepted[name] = str(_parse_int(name, value, 1, 65535))
+            accepted[name] = str(_parse_int(name, value, MIN_WINDOWSIZE, MAX_WINDOWSIZE))
     return accepted
