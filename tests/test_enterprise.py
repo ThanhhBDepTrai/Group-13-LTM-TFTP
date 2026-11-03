@@ -83,6 +83,33 @@ class EnterpriseTests(unittest.TestCase):
         with self.assertRaises(EnterpriseError):  # không cho xóa
             self.svc.delete_file(other, "/company_files/shared/a.txt")
 
+    def test_acl_department_scope(self):
+        dep = self.svc.departments.create("Kỹ thuật")
+        self.user("kt1", "EMPLOYEE")
+        outsider = self.user("kt2", "EMPLOYEE")
+        self.svc.employees.create("Nguyễn Văn A", username="kt1", department_id=dep["id"])
+        member = self.svc.accounts.get_user("kt1")
+        self.assertEqual(member["department"], "Kỹ thuật")
+        self.svc.folders.create("/company_files/ky_thuat", owner="root")
+        with self.assertRaises(EnterpriseError):  # chưa cấp quyền cho phòng ban
+            self.svc.authorize_transfer(member, "RRQ", "/company_files/ky_thuat/tai_lieu.txt")
+        self.svc.acl.set("/company_files/ky_thuat", "department", "Kỹ thuật",
+                         read=True, write=True)
+        self.svc.authorize_transfer(member, "WRQ", "/company_files/ky_thuat/tai_lieu.txt")
+        self.svc.authorize_transfer(member, "RRQ", "/company_files/ky_thuat/tai_lieu.txt")
+        with self.assertRaises(EnterpriseError):  # ngoài phòng ban vẫn bị chặn
+            self.svc.authorize_transfer(outsider, "RRQ", "/company_files/ky_thuat/tai_lieu.txt")
+
+    def test_acl_most_specific_path_wins(self):
+        emp = self.user("emp", "EMPLOYEE")
+        self.svc.folders.create("/company_files", owner="root")
+        self.svc.folders.create("/company_files/secret", owner="root")
+        self.svc.acl.set("/company_files", "role", "EMPLOYEE", read=True)
+        self.svc.authorize_transfer(emp, "RRQ", "/company_files/public.txt")
+        self.svc.acl.set("/company_files/secret", "role", "EMPLOYEE", read=False)
+        with self.assertRaises(EnterpriseError):  # quy tắc cụ thể hơn (deny) thắng
+            self.svc.authorize_transfer(emp, "RRQ", "/company_files/secret/private.txt")
+
     def test_path_traversal_blocked(self):
         # normalize() gập '..' về gốc ảo nên không thể thoát khỏi storage
         real = self.svc.authorize_transfer(self.root, "RRQ", "/../../etc/passwd")

@@ -1,8 +1,21 @@
-@"
 __pycache__/
 *.py[cod]
 .env
 .venv/
 venv/
 .pytest_cache/
-"@ | Out-File -Encoding utf8 .gitignore
+.coverage
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+*.spec
+*.egg-info/
+
+# Runtime data / local state
+tftp_admin.db*
+*.metrics.db*
+pxe_profiles.json
+server_storage/
+*.downloaded.md

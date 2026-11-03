@@ -12,7 +12,7 @@ pyinstaller --noconfirm --clean --onefile --windowed `
 pyinstaller --noconfirm --clean --onefile --console `
   --name TFTPProServer tftp_server.py
 
-$folder = "dist\TFTPPro-v1.0.0-windows-x64"
+$folder = "dist\TFTPPro-v1.1.0-windows-x64"
 New-Item -ItemType Directory -Force $folder | Out-Null
 Copy-Item dist\TFTPProServer.exe, README.md, LICENSE $folder -ErrorAction SilentlyContinue
 Compress-Archive -Path "$folder\*" -DestinationPath "$folder.zip" -Force

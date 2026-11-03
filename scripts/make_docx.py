@@ -1,7 +1,9 @@
 import zipfile
+from pathlib import Path
 from xml.sax.saxutils import escape
 
-docx_path = r"E:\VSCode\TFTP-Pro\docs\phan_chia_cong_viec.docx"
+docx_path = Path(__file__).resolve().parents[1] / "docs" / "phan_chia_cong_viec.docx"
+docx_path.parent.mkdir(parents=True, exist_ok=True)
 
 rows = [
     ("Thành viên", "Vai trò", "File sở hữu", "Trách nhiệm chính", "Giờ"),
