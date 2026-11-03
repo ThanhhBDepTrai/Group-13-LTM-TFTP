@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tftp-pro"
+version = "1.1.0"
+description = "TFTP Pro: TFTP client/server with RFC 7440, Admin API, SHA-256, monitoring and PXE profiles."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Group 13", email = "group13@example.com" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.4"]
+
+[project.scripts]
+tftp-server = "tftp_server:main"
+tftp-client = "tftp_client:main"
+tftp-gui = "tftp_gui:main"
+tftp-pro = "tftp_pro:main"
+tftp-admin-api = "admin_api:main"
+efm = "enterprise.cli:main"
+efm-app = "efm_app:main"
+
+[tool.setuptools.packages.find]
+include = ["enterprise*", "database*", "client*"]
+
+[tool.setuptools]
+py-modules = [
+    "efm_app",
+    "admin_api",
+    "admin_client",
+    "auth",
+    "metrics",
+    "packet_analyzer",
+    "packet_trace",
+    "pxe_config",
+    "storage_manager",
+    "tftp_client",
+    "tftp_config",
+    "tftp_gui",
+    "tftp_options",
+    "tftp_packet",
+    "tftp_pro",
+    "tftp_server",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

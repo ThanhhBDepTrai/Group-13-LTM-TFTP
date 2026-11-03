@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "lab-default",
+      "description": "Profile PXE mẫu cho lab BIOS/UEFI (iPXE).",
+      "bios_file": "pxe/boot/undionly.kpxe",
+      "uefi_file": "pxe/efi/ipxe.efi",
+      "default": true
+    }
+  ]
+}

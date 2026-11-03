@@ -1,0 +1,9 @@
+[Unit]
+Description=EFM TFTP Server
+After=network.target
+[Service]
+WorkingDirectory=/opt/efm
+ExecStart=/opt/efm/.venv/bin/python tftp_server.py
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target
