@@ -1,343 +1,207 @@
-"""Quản lý boot profile cho lab PXE.
+"""Cấu hình và quản lý boot file cho PXE (boot qua mạng bằng TFTP).
 
-TFTP Pro **không** chạy DHCP server. Module này chỉ quản lý tên boot file và
-profile BIOS/UEFI; DHCP độc lập trong lab sẽ trả ``next-server`` và
-``bootfile-name`` trỏ tới TFTP Server. Mọi đường dẫn boot file đều đi qua
-:class:`StorageManager` để không thoát khỏi thư mục chia sẻ.
+Lưu ý thực tế: firmware PXE chỉ nói chuyện qua UDP cổng 69 và không đổi được cổng,
+vì vậy khi dùng thật cần chạy TFTP server với ``--port 69`` (quyền admin/root).
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
-import os
-import re
 import threading
-import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from storage_manager import StorageError, StorageManager
-from tftp_config import DEFAULT_PXE_PROFILES, PXE_BOOT_DIRS
 
-_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
-_ARCH_ALIASES = {
-    "bios": "bios",
-    "legacy": "bios",
-    "x86": "bios",
-    "uefi": "uefi",
-    "efi": "uefi",
-    "uefi64": "uefi",
-    "x86_64": "uefi",
-    "amd64": "uefi",
-    "arm64": "uefi",
+__all__ = ["ARCH_BY_CODE", "DEFAULT_BOOT_FILES", "PXEConfig", "PXEError", "PXEManager"]
+
+# Giá trị DHCP option 93 (Client System Architecture, RFC 4578)
+ARCH_BY_CODE = {0: "bios", 6: "efi32", 7: "efi64", 9: "efi64", 11: "arm64"}
+DHCP_CODES = {"bios": 0, "efi32": 6, "efi64": 7, "arm64": 11}
+DEFAULT_BOOT_FILES = {
+    "bios": "pxelinux.0",
+    "efi32": "bootia32.efi",
+    "efi64": "grubx64.efi",
+    "arm64": "grubaa64.efi",
 }
 
 
-class PxeError(Exception):
-    """Lỗi cấu hình PXE kèm HTTP status gợi ý."""
-
-    def __init__(self, message: str, status: int = 400):
-        super().__init__(message)
-        self.message = message
-        self.status = status
+class PXEError(ValueError):
+    """Cấu hình PXE không hợp lệ."""
 
 
-@dataclass(frozen=True)
-class PxeProfile:
-    name: str
-    bios_file: str | None = None
-    uefi_file: str | None = None
-    description: str = ""
-    default: bool = False
+@dataclass
+class PXEConfig:
+    enabled: bool = False
+    boot_dir: str = "pxe"
+    boot_files: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_BOOT_FILES))
+    next_server: str = ""
 
-    def to_dict(self, storage: StorageManager | None = None) -> dict:
-        data = {
-            "name": self.name,
-            "description": self.description,
-            "bios_file": self.bios_file,
-            "uefi_file": self.uefi_file,
-            "default": self.default,
-        }
-        if storage is not None:
-            missing = []
-            for key in ("bios_file", "uefi_file"):
-                relative = data[key]
-                exists = bool(relative) and storage.exists(relative)
-                data[f"{key.removesuffix('_file')}_exists"] = exists
-                if relative and not exists:
-                    missing.append(relative)
-            data["missing_files"] = missing
-        return data
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
-def normalize_arch(arch: str | None) -> str:
-    """Chuẩn hóa tên kiến trúc firmware về ``bios`` hoặc ``uefi``."""
-    text = str(arch or "bios").strip().lower()
-    result = _ARCH_ALIASES.get(text)
-    if result is None:
-        raise PxeError(
-            "Kiến trúc phải là bios/legacy hoặc uefi/efi/uefi64", 400
-        )
-    return result
-
-
-def _default_data() -> dict:
-    return {
-        "version": 1,
-        "profiles": [
-            {
-                "name": "lab-default",
-                "description": "Profile PXE mẫu cho lab BIOS/UEFI (iPXE).",
-                "bios_file": "pxe/boot/undionly.kpxe",
-                "uefi_file": "pxe/efi/ipxe.efi",
-                "default": True,
-            }
-        ],
-    }
-
-
-class PxeManager:
-    """Đọc/ghi ``pxe_profiles.json`` an toàn và kiểm tra boot file."""
-
-    def __init__(
-        self,
-        storage: StorageManager,
-        path: str | Path = DEFAULT_PXE_PROFILES,
-        *,
-        auto_create: bool = True,
-    ):
+class PXEManager:
+    def __init__(self, storage: StorageManager, config_path: str | Path | None = None):
         self.storage = storage
-        self.path = Path(path).expanduser()
+        self.config_path = Path(config_path) if config_path else None
+        self.config = PXEConfig()
         self._lock = threading.RLock()
-        self.storage.ensure_layout()
-        if auto_create and not self.path.exists():
-            self._write_data(_default_data())
-        self._data = self._load_data()
+        if self.config_path and self.config_path.exists():
+            self._load()
 
     # ------------------------------------------------------------------ #
-    # I/O
+    # Lưu / nạp
     # ------------------------------------------------------------------ #
-    def _load_data(self) -> dict:
+
+    def _load(self) -> None:
+        assert self.config_path is not None
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return {"version": 1, "profiles": []}
-        except (OSError, json.JSONDecodeError) as exc:
-            raise PxeError(f"Không đọc được cấu hình PXE: {exc}", 500) from exc
-        if not isinstance(raw, dict) or not isinstance(raw.get("profiles"), list):
-            raise PxeError("Cấu hình PXE phải có mảng 'profiles'", 400)
-        return raw
+            data = json.loads(self.config_path.read_text(encoding="utf-8"))
+            self.config = self._validated(PXEConfig(**data))
+        except (OSError, ValueError, TypeError) as exc:
+            raise PXEError(f"Cannot load PXE config: {exc}") from exc
 
-    def _write_data(self, data: dict) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temp = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
+    def _save(self) -> None:
+        if self.config_path is None:
+            return
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.config_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.config.to_dict(), indent=2), encoding="utf-8")
+        tmp.replace(self.config_path)
+
+    # ------------------------------------------------------------------ #
+    # Kiểm tra / cập nhật
+    # ------------------------------------------------------------------ #
+
+    def _validated(self, config: PXEConfig) -> PXEConfig:
+        config.enabled = bool(config.enabled)
         try:
-            with open(temp, "w", encoding="utf-8") as file:
-                json.dump(data, file, indent=2, ensure_ascii=False)
-                file.write("\n")
-                file.flush()
-                os.fsync(file.fileno())
-            os.replace(temp, self.path)
-        except OSError as exc:
-            raise PxeError(f"Không ghi được cấu hình PXE: {exc}", 500) from exc
-        finally:
-            try:
-                temp.unlink(missing_ok=True)
-            except OSError:
-                pass
+            boot_dir = self.storage.resolve(config.boot_dir)
+        except StorageError as exc:
+            raise PXEError("boot_dir must stay inside the storage root") from exc
+        if boot_dir == self.storage.root:
+            raise PXEError("boot_dir must be a sub-directory, not the storage root")
+        config.boot_dir = self.storage.relative(boot_dir)
 
-    # ------------------------------------------------------------------ #
-    # Chuẩn hóa profile
-    # ------------------------------------------------------------------ #
-    def _normalise(self, data: dict, *, require_files: bool) -> dict:
-        if not isinstance(data, dict):
-            raise PxeError("Profile phải là JSON object", 400)
-        name = str(data.get("name", "")).strip()
-        if not _PROFILE_NAME_RE.fullmatch(name):
-            raise PxeError(
-                "Tên profile chỉ gồm chữ, số, _ . - (1-64 ký tự)", 400
-            )
-
-        description = str(data.get("description", "")).strip()
-        if len(description) > 500:
-            raise PxeError("Mô tả profile tối đa 500 ký tự", 400)
-
-        files: dict[str, str | None] = {}
-        for key, label in (("bios_file", "BIOS"), ("uefi_file", "UEFI")):
-            value = data.get(key)
-            if value is None or str(value).strip() == "":
-                files[key] = None
+        files: dict[str, str] = {}
+        for arch, name in config.boot_files.items():
+            if arch not in DHCP_CODES:
+                raise PXEError(f"Unknown architecture: {arch}")
+            clean = str(name).strip().replace("\\", "/").lstrip("/")
+            if not clean:
                 continue
             try:
-                relative = self.storage.clean_relative(str(value))
-                path = self.storage.resolve(relative)
+                self.storage.resolve(f"{config.boot_dir}/{clean}")
             except StorageError as exc:
-                raise PxeError(
-                    f"Đường dẫn {label} không hợp lệ: {exc.message}", exc.status
-                ) from exc
-            if not relative:
-                files[key] = None
-                continue
-            if require_files and not path.is_file():
-                raise PxeError(f"Boot file {label} không tồn tại: {relative}", 400)
-            files[key] = relative
+                raise PXEError(f"Boot file outside boot_dir: {name}") from exc
+            files[arch] = clean
+        config.boot_files = files
 
-        if not files["bios_file"] and not files["uefi_file"]:
-            raise PxeError("Profile phải có ít nhất bios_file hoặc uefi_file", 400)
-
-        return {
-            "name": name,
-            "description": description,
-            "bios_file": files["bios_file"],
-            "uefi_file": files["uefi_file"],
-            "default": bool(data.get("default", False)),
-        }
-
-    @staticmethod
-    def _profile_from_dict(data: dict) -> PxeProfile:
-        return PxeProfile(
-            name=str(data["name"]),
-            description=str(data.get("description", "")),
-            bios_file=data.get("bios_file"),
-            uefi_file=data.get("uefi_file"),
-            default=bool(data.get("default", False)),
-        )
-
-    def _profiles(self) -> list[dict]:
-        return list(self._data.get("profiles", []))
-
-    def _set_profiles(self, profiles: list[dict]) -> None:
-        data = dict(self._data)
-        data["version"] = int(data.get("version", 1))
-        data["profiles"] = profiles
-        self._write_data(data)
-        self._data = data
-
-    @staticmethod
-    def _ensure_one_default(profiles: list[dict]) -> list[dict]:
-        if not profiles:
-            return profiles
-        defaults = [profile for profile in profiles if profile.get("default")]
-        if not defaults:
-            profiles[0]["default"] = True
-        elif len(defaults) > 1:
-            first = defaults[0]["name"]
-            for profile in profiles:
-                profile["default"] = profile["name"] == first
-        return profiles
-
-    # ------------------------------------------------------------------ #
-    # API quản trị
-    # ------------------------------------------------------------------ #
-    def list_profiles(self) -> list[dict]:
-        with self._lock:
-            profiles = [
-                self._profile_from_dict(item) for item in self._profiles()
-            ]
-        return [profile.to_dict(self.storage) for profile in profiles]
-
-    def get_profile(self, name: str) -> dict:
-        text = str(name).strip()
-        with self._lock:
-            for item in self._profiles():
-                if item["name"] == text:
-                    return self._profile_from_dict(item).to_dict(self.storage)
-        raise PxeError("Không tìm thấy profile PXE", 404)
-
-    def upsert_profile(self, data: dict, *, require_files: bool = False) -> dict:
-        incoming = self._normalise(data, require_files=require_files)
-        with self._lock:
-            profiles = self._profiles()
-            existing = next(
-                (item for item in profiles if item["name"] == incoming["name"]),
-                None,
-            )
-            if existing is not None and "default" not in data:
-                incoming["default"] = bool(existing.get("default"))
-            if incoming["default"]:
-                for item in profiles:
-                    item["default"] = item["name"] == incoming["name"]
-            if existing is None:
-                profiles.append(incoming)
-            else:
-                existing.update(incoming)
-            self._set_profiles(self._ensure_one_default(profiles))
-        return self.get_profile(incoming["name"])
-
-    def delete_profile(self, name: str) -> None:
-        text = str(name).strip()
-        with self._lock:
-            profiles = self._profiles()
-            remaining = [item for item in profiles if item["name"] != text]
-            if len(remaining) == len(profiles):
-                raise PxeError("Không tìm thấy profile PXE", 404)
-            self._set_profiles(self._ensure_one_default(remaining))
-
-    def select_profile(self, arch: str = "bios", *, name: str | None = None) -> dict:
-        arch_group = normalize_arch(arch)
-        with self._lock:
-            profiles = self._profiles()
-            if name:
-                item = next(
-                    (profile for profile in profiles if profile["name"] == name),
-                    None,
-                )
-                if item is None:
-                    raise PxeError("Không tìm thấy profile PXE", 404)
-            else:
-                item = next(
-                    (profile for profile in profiles if profile.get("default")),
-                    profiles[0] if profiles else None,
-                )
-            if item is None:
-                raise PxeError("Chưa cấu hình profile PXE nào", 404)
-
-        profile = self._profile_from_dict(item)
-        boot_file = (
-            profile.uefi_file if arch_group == "uefi" else profile.bios_file
-        )
-        public = profile.to_dict(self.storage)
-        public.update(
-            {
-                "arch": arch_group,
-                "boot_file": boot_file,
-                "boot_file_exists": bool(boot_file)
-                and self.storage.exists(boot_file),
-            }
-        )
-        return public
-
-    def validate_all(self) -> list[dict]:
-        """Trả danh sách vấn đề của toàn bộ profile (không ném lỗi)."""
-        issues = []
-        with self._lock:
-            raw_profiles = self._profiles()
-        for item in raw_profiles:
+        if config.next_server:
             try:
-                profile = self._profile_from_dict(item)
-            except (KeyError, TypeError, ValueError):
-                issues.append({"name": item.get("name"), "error": "Profile hỏng"})
-                continue
-            for key in ("bios_file", "uefi_file"):
-                relative = getattr(profile, key)
-                if relative and not self.storage.exists(relative):
-                    issues.append(
-                        {
-                            "name": profile.name,
-                            "file": relative,
-                            "error": f"{key} không tồn tại",
-                        }
-                    )
-        return issues
+                config.next_server = str(ipaddress.ip_address(config.next_server.strip()))
+            except ValueError as exc:
+                raise PXEError("next_server must be an IP address") from exc
+        return config
 
-    def ensure_directories(self) -> None:
-        for relative in PXE_BOOT_DIRS:
-            self.storage.mkdir(relative, parents=True, exist_ok=True)
+    def update(
+        self,
+        *,
+        enabled: bool | None = None,
+        boot_dir: str | None = None,
+        boot_files: dict[str, str] | None = None,
+        next_server: str | None = None,
+    ) -> PXEConfig:
+        with self._lock:
+            draft = PXEConfig(**self.config.to_dict())
+            if enabled is not None:
+                draft.enabled = enabled
+            if boot_dir is not None:
+                draft.boot_dir = boot_dir
+            if boot_files is not None:
+                draft.boot_files = {**draft.boot_files, **boot_files}
+            if next_server is not None:
+                draft.next_server = next_server
+            self.config = self._validated(draft)
+            if self.config.enabled:
+                self.boot_dir_path().mkdir(parents=True, exist_ok=True)
+            self._save()
+            return self.config
 
+    # ------------------------------------------------------------------ #
+    # Truy vấn
+    # ------------------------------------------------------------------ #
 
-__all__ = [
-    "PxeError",
-    "PxeManager",
-    "PxeProfile",
-    "normalize_arch",
-]
+    def boot_dir_path(self) -> Path:
+        return self.storage.resolve(self.config.boot_dir)
+
+    def is_boot_path(self, path: Path) -> bool:
+        base = self.boot_dir_path()
+        resolved = path.resolve()
+        return resolved == base or base in resolved.parents
+
+    def find_boot_file(self, name: str) -> Path | None:
+        """Tìm ``name`` trong thư mục boot (client PXE thường chỉ xin tên file trần)."""
+        try:
+            candidate = self.storage.resolve(
+                f"{self.config.boot_dir}/{name.replace(chr(92), '/').lstrip('/')}", ignore_case=True
+            )
+        except StorageError:
+            return None
+        return candidate if candidate.is_file() else None
+
+    def list_boot_files(self) -> list[dict]:
+        base = self.boot_dir_path()
+        if not base.is_dir():
+            return []
+        files = []
+        for item in sorted(base.rglob("*")):
+            if item.is_file() and not item.name.startswith("."):
+                files.append({
+                    "path": self.storage.relative(item),
+                    "name": item.relative_to(base).as_posix(),
+                    "size": item.stat().st_size,
+                })
+        return files
+
+    def bootfile_for_arch(self, arch: int | str) -> str | None:
+        """Đường dẫn (tính từ gốc TFTP) cần đưa vào DHCP cho kiến trúc ``arch``."""
+        key = ARCH_BY_CODE.get(arch) if isinstance(arch, int) else arch
+        name = self.config.boot_files.get(key or "")
+        return f"{self.config.boot_dir}/{name}" if name else None
+
+    def validate(self) -> list[str]:
+        """Danh sách vấn đề cần sửa; rỗng nghĩa là cấu hình dùng được."""
+        problems: list[str] = []
+        if not self.boot_dir_path().is_dir():
+            problems.append(f"Boot directory '{self.config.boot_dir}' does not exist")
+        for arch, name in sorted(self.config.boot_files.items()):
+            if self.find_boot_file(name) is None:
+                problems.append(f"Boot file for {arch} is missing: {self.config.boot_dir}/{name}")
+        if not self.config.next_server:
+            problems.append("next_server is not set (needed for DHCP snippets)")
+        return problems
+
+    def dhcp_snippet(self, fmt: str = "dnsmasq") -> str:
+        server = self.config.next_server or "<TFTP-SERVER-IP>"
+        entries = [
+            (arch, DHCP_CODES[arch], f"{self.config.boot_dir}/{name}")
+            for arch, name in sorted(self.config.boot_files.items(), key=lambda kv: DHCP_CODES[kv[0]])
+        ]
+        note = "# PXE chi dung UDP cong 69: chay TFTP server voi --port 69"
+        if fmt == "dnsmasq":
+            lines = [note]
+            for arch, code, _ in entries:
+                lines.append(f"dhcp-match=set:{arch},option:client-arch,{code}")
+            for arch, _, path in entries:
+                lines.append(f"dhcp-boot=tag:{arch},{path},,{server}")
+            return "\n".join(lines) + "\n"
+        if fmt == "isc":
+            lines = [note, "option arch code 93 = unsigned integer 16;", f"next-server {server};"]
+            for index, (_, code, path) in enumerate(entries):
+                keyword = "if" if index == 0 else "elsif"
+                lines.append(f'{keyword} option arch = 00:{code:02x} {{ filename "{path}"; }}')
+            return "\n".join(lines) + "\n"
+        raise PXEError("fmt must be 'dnsmasq' or 'isc'")
