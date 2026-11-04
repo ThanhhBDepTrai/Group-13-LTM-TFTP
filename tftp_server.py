@@ -621,11 +621,10 @@ class TFTPServer:
                 pass
 
     def serve_forever(self) -> None:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind((self.config.host, self.config.port))
-        self.sock = sock
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._list_sock = None
         threading.Thread(target=self._tcp_listing_loop, daemon=True).start()
+        self.sock.bind((self.config.host, self.config.port))
         logger.info("TFTP server listening on %s:%d, root=%s", self.config.host, self.config.port, self.root)
         while not self._stop.is_set():
             try:
