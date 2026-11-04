@@ -86,7 +86,7 @@ class AdminClient:
     def login(self, username: str, password: str) -> dict:
         result = self._request(
             "POST",
-            "/api/auth/login",
+            "/api/ent/login",
             json_body={"username": username, "password": password},
         )
         self.token = result.get("token")
@@ -94,11 +94,11 @@ class AdminClient:
 
     def logout(self) -> None:
         if self.token:
-            self._request("POST", "/api/auth/logout")
+            self._request("POST", "/api/ent/logout")
         self.token = None
 
     def me(self) -> dict:
-        return self._request("GET", "/api/auth/me")
+        return self._request("GET", "/api/ent/me")
 
     def health(self) -> dict:
         return self._request("GET", "/api/health")
@@ -168,13 +168,16 @@ class AdminClient:
     # Users / dashboard / packets / PXE
     # ------------------------------------------------------------------ #
     def list_users(self) -> list[dict]:
-        return self._request("GET", "/api/users")["users"]
+        # Enterprise account directory; do not mix it with legacy TFTP accounts.
+        return self._request("GET", "/api/ent/users")["users"]
 
-    def create_user(self, username: str, password: str, role: str = "user") -> dict:
+    def list_employees(self) -> list[dict]:
+        return self._request("GET", "/api/ent/employees")["employees"]
+
+    def create_user(self, username: str, password: str, role: str = "EMPLOYEE") -> dict:
         return self._request(
-            "POST",
-            "/api/users",
-            json_body={"username": username, "password": password, "role": role},
+            "POST", "/api/ent/users",
+            json_body={"username": username, "password": password, "role": role.upper()},
         )
 
     def delete_user(self, username: str) -> dict:
@@ -182,8 +185,8 @@ class AdminClient:
 
     def set_user_role(self, username: str, role: str) -> dict:
         return self._request(
-            "POST", "/api/users/role", json_body={"username": username, "role": role}
-        )["user"]
+            "POST", "/api/ent/users/role", json_body={"username": username, "role": role.upper()}
+        )
 
     def set_user_active(self, username: str, active: bool) -> dict:
         return self._request(
