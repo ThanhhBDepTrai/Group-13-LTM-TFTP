@@ -110,4 +110,4 @@ class Database:
             conn.close()
 
 
-__all__ = ["Database", "SCHEMA_VERSION", "now_iso"]
+__all__ = ["SCHEMA_VERSION", "Database", "now_iso"]

@@ -29,9 +29,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tftp_client import TFTPClient  # noqa: E402
-from tftp_config import ClientConfig, ServerConfig  # noqa: E402
-from tftp_server import TFTPServer  # noqa: E402
+from tftp_client import TFTPClient
+from tftp_config import ClientConfig, ServerConfig
+from tftp_server import TFTPServer
 
 
 @dataclass

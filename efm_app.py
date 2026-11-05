@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 import tkinter as tk
-from pathlib import Path
 from tkinter import messagebox, ttk
 
 from client.login_manager import LoginManager

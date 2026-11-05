@@ -137,7 +137,7 @@ class Database:
         assignments = ", ".join(f"{name} = ?" for name in changes)  # tên cột nằm trong whitelist
         try:
             cursor = self._run(
-                f"UPDATE users SET {assignments} WHERE id = ?",  # noqa: S608
+                f"UPDATE users SET {assignments} WHERE id = ?",
                 (*changes.values(), user_id),
             )
         except sqlite3.IntegrityError as exc:
@@ -156,7 +156,7 @@ class Database:
                   for column in _TRANSFER_COLUMNS]
         placeholders = ", ".join("?" for _ in _TRANSFER_COLUMNS)
         cursor = self._run(
-            f"INSERT INTO transfers ({', '.join(_TRANSFER_COLUMNS)}) VALUES ({placeholders})",  # noqa: S608
+            f"INSERT INTO transfers ({', '.join(_TRANSFER_COLUMNS)}) VALUES ({placeholders})",
             values,
         )
         return int(cursor.lastrowid)
@@ -192,7 +192,7 @@ class Database:
         limit = max(1, min(int(limit), 1000))
         offset = max(0, int(offset))
         return self._all(
-            f"SELECT * FROM transfers {where} ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?",  # noqa: S608
+            f"SELECT * FROM transfers {where} ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?",
             (*params, limit, offset),
         )
 

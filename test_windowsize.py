@@ -7,16 +7,6 @@ import threading
 
 import pytest
 from helpers import make_client, run_pair, running_server, sha256_bytes
-
-from tftp_packet import (
-    OP_ACK,
-    OP_ERROR,
-    TFTPError,
-    pack_ack,
-    pack_data,
-    pack_error,
-    unpack_packet,
-)
 from tftp_transfer import (
     Channel,
     RemoteError,
@@ -24,6 +14,15 @@ from tftp_transfer import (
     make_udp_socket,
     receive_blocks,
     send_blocks,
+)
+
+from tftp_packet import (
+    OP_ERROR,
+    TFTPError,
+    pack_ack,
+    pack_data,
+    pack_error,
+    unpack_packet,
 )
 
 

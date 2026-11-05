@@ -6,13 +6,13 @@ import time
 
 import pytest
 from helpers import make_client, running_server
+from tftp_transfer import RemoteError
 
 from auth import ADMIN, GUEST, ROLE_PERMISSIONS, USER, AuthError, AuthService, PermissionDenied
 from database import Database, DatabaseError
 from metrics import MetricsService
 from pxe_config import PXEManager
 from storage_manager import ManagedHooks, StorageManager
-from tftp_transfer import RemoteError
 
 FAST = {"iterations": 1000}  # PBKDF2 nhẹ để test nhanh
 
