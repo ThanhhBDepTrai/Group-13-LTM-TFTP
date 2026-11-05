@@ -15,16 +15,19 @@ import logging
 import os
 import queue
 import re
+import sqlite3
 import sys
 import threading
 import time
-import unicodedata
 import tkinter as tk
+import unicodedata
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from admin_client import AdminClient
+from admin_client import AdminAPIError, AdminClient
 from enterprise.server_runtime import ServerRuntime
+from enterprise.workspace.local_workspace_registry import LocalWorkspaceRegistry
 from packet_analyzer import PacketAnalyzer, PacketFilter
 from tftp_client import TFTPClient
 from tftp_config import (
@@ -48,8 +51,22 @@ if sys.platform == "win32":
 
 APP_DIR = Path(os.getenv("APPDATA", Path.home())) / "TFTPPro"
 CONFIG_PATH = APP_DIR / "config.json"
+WORKSPACE_REGISTRY_PATH = APP_DIR / "workspaces.json"
 DEFAULT_ADMIN_URL = f"http://{DEFAULT_ADMIN_HOST}:{DEFAULT_ADMIN_PORT}"
 logger = logging.getLogger(__name__)
+
+
+def _format_modified_at(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        timestamp = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text
+    if timestamp.tzinfo is not None:
+        timestamp = timestamp.astimezone()
+    return timestamp.strftime("%d/%m/%Y %H:%M:%S")
 
 
 def load_config() -> dict:
@@ -301,6 +318,11 @@ class TFTPApp(tk.Tk):
         ).pack(pady=(0, 22))
         ttk.Button(create_card, text="CREATE SERVER",
                    command=self._open_create_server).pack(fill=tk.X, ipady=7)
+        ttk.Button(
+            create_card,
+            text="LOGIN TO SAVED WORKSPACE",
+            command=self._open_saved_workspace_login,
+        ).pack(fill=tk.X, ipady=7, pady=(8, 0))
 
         join_card = tk.Frame(
             cards, bg="white", highlightbackground="#DCE4ED",
@@ -331,6 +353,194 @@ class TFTPApp(tk.Tk):
 
     def _open_join_server(self):
         self._build_login_ui()
+
+    def _local_workspaces(self) -> list[dict]:
+        registry = LocalWorkspaceRegistry(WORKSPACE_REGISTRY_PATH)
+        try:
+            workspaces = registry.list()
+        except (TypeError, ValueError) as exc:
+            logger.warning("%s", exc)
+            messagebox.showwarning("Workspace", str(exc), parent=self)
+            workspaces = []
+
+        known_ids = {str(item.get("workspace_id", "")) for item in workspaces}
+        data_root = APP_DIR / "servers"
+        default_storage = Path.home() / "EnterpriseFileManager" / "storage"
+        for db_path in sorted(data_root.glob("*/efm.db")):
+            workspace_id = db_path.parent.name
+            if workspace_id in known_ids:
+                continue
+            try:
+                with sqlite3.connect(db_path) as connection:
+                    server = connection.execute(
+                        "SELECT server_id, name, api_port, tftp_port FROM servers LIMIT 1"
+                    ).fetchone()
+                    workspace = connection.execute(
+                        "SELECT name FROM workspaces ORDER BY id LIMIT 1"
+                    ).fetchone()
+            except sqlite3.Error:
+                logger.exception("Không thể khôi phục thông tin từ %s", db_path)
+                continue
+            if server is None:
+                continue
+            workspaces.append(
+                {
+                    "workspace_id": workspace_id,
+                    "workspace_name": workspace[0] if workspace else server[1],
+                    "company_name": server[1],
+                    "data_dir": str(db_path.parent),
+                    "storage_location": str(default_storage),
+                    "server_id": server[0],
+                    "api_port": server[2],
+                    "tftp_port": server[3],
+                    "recovered": True,
+                }
+            )
+        return sorted(workspaces, key=lambda item: item["workspace_name"].casefold())
+
+    def _open_saved_workspace_login(self):
+        workspaces = self._local_workspaces()
+        if not workspaces:
+            messagebox.showinfo(
+                "Workspace",
+                "Chưa tìm thấy Workspace đã lưu trên máy này. "
+                "Chọn Create Server để tạo Workspace mới.",
+                parent=self,
+            )
+            return
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Login to saved Workspace")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        labels = [
+            f"{item['workspace_name']} ({item['server_id']})" for item in workspaces
+        ]
+        by_label = dict(zip(labels, workspaces, strict=True))
+        selected = tk.StringVar(value=labels[0])
+        username = tk.StringVar(value="admin")
+        password = tk.StringVar()
+        storage = tk.StringVar(value=workspaces[0].get("storage_location", ""))
+        status = tk.StringVar(value="Chọn Workspace đã tạo trước đó.")
+
+        form = ttk.Frame(dialog, padding=16)
+        form.grid(sticky="nsew")
+        ttk.Label(form, text="Workspace:").grid(row=0, column=0, sticky="w", pady=5)
+        workspace_box = ttk.Combobox(
+            form, textvariable=selected, values=labels, state="readonly", width=45
+        )
+        workspace_box.grid(row=0, column=1, columnspan=2, sticky="ew", pady=5)
+        ttk.Label(form, text="Thư mục lưu file:").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Entry(form, textvariable=storage, width=46).grid(
+            row=1, column=1, sticky="ew", pady=5
+        )
+
+        def browse_storage():
+            folder = filedialog.askdirectory(
+                title="Chọn đúng thư mục lưu file của Workspace",
+                initialdir=storage.get() or str(Path.home()),
+                parent=dialog,
+            )
+            if folder:
+                storage.set(folder)
+
+        ttk.Button(form, text="Browse", command=browse_storage).grid(
+            row=1, column=2, padx=(6, 0), pady=5
+        )
+        ttk.Label(form, text="Username:").grid(row=2, column=0, sticky="w", pady=5)
+        ttk.Entry(form, textvariable=username).grid(
+            row=2, column=1, columnspan=2, sticky="ew", pady=5
+        )
+        ttk.Label(form, text="Password:").grid(row=3, column=0, sticky="w", pady=5)
+        ttk.Entry(form, textvariable=password, show="*").grid(
+            row=3, column=1, columnspan=2, sticky="ew", pady=5
+        )
+        ttk.Label(form, textvariable=status, wraplength=440).grid(
+            row=4, column=0, columnspan=3, sticky="w", pady=(8, 4)
+        )
+        login_button = ttk.Button(form, text="Khởi động và đăng nhập")
+        login_button.grid(row=5, column=2, sticky="e", pady=(8, 0))
+        ttk.Button(form, text="Đóng", command=dialog.destroy).grid(
+            row=5, column=1, sticky="e", pady=(8, 0)
+        )
+
+        def selection_changed(_event=None):
+            entry = by_label.get(selected.get())
+            if entry:
+                storage.set(entry.get("storage_location", ""))
+
+        workspace_box.bind("<<ComboboxSelected>>", selection_changed)
+
+        def start_login():
+            entry = by_label.get(selected.get())
+            user_name = username.get().strip()
+            secret = password.get()
+            storage_path = Path(storage.get().strip()).expanduser()
+            if entry is None or not user_name or not secret:
+                messagebox.showwarning(
+                    "Login", "Chọn Workspace và nhập username/password.", parent=dialog
+                )
+                return
+            if not storage_path.is_dir():
+                messagebox.showwarning(
+                    "Workspace",
+                    "Không tìm thấy thư mục lưu file. Hãy chọn đúng thư mục đã dùng "
+                    "khi tạo Workspace.",
+                    parent=dialog,
+                )
+                return
+            login_button.configure(state="disabled")
+            status.set("Đang kiểm tra và khởi động Workspace...")
+
+            def worker():
+                runtime = None
+                try:
+                    record = dict(entry)
+                    record["storage_location"] = str(storage_path)
+                    url = f"http://127.0.0.1:{int(record['api_port'])}"
+                    client = AdminClient(url)
+                    try:
+                        health = client.health()
+                    except AdminAPIError as exc:
+                        if exc.status != 0:
+                            raise
+                        runtime = ServerRuntime(record["data_dir"], storage_path)
+                        runtime.start()
+                        client = AdminClient(url)
+                        health = client.health()
+                    if health.get("server_id") != record["server_id"]:
+                        raise ValueError(
+                            "Server ID không khớp với Workspace đã lưu; "
+                            "đã từ chối đăng nhập nhầm Server."
+                        )
+                    result = client.login(user_name, secret)
+                    LocalWorkspaceRegistry(WORKSPACE_REGISTRY_PATH).save(record)
+                    self._queue.put(
+                        (
+                            "saved_workspace_login_ok",
+                            (dialog, client, result, record, runtime),
+                        )
+                    )
+                except Exception as exc:  # noqa: BLE001 - forward background errors to the UI
+                    error_message = str(exc)
+                    if runtime is not None:
+                        try:
+                            runtime.stop()
+                        except Exception as stop_exc:
+                            logger.exception("Không dừng được runtime Workspace sau lỗi đăng nhập")
+                            error_message += f"\nKhông dừng được runtime: {stop_exc}"
+                    self._queue.put(
+                        (
+                            "saved_workspace_login_error",
+                            (dialog, status, login_button, error_message),
+                        )
+                    )
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        login_button.configure(command=start_login)
 
     # ------------------------------------------------------------------ #
     # 2. Create Workspace
@@ -598,20 +808,44 @@ class TFTPApp(tk.Tk):
                 )
             client = AdminClient(f"http://127.0.0.1:{cfg.api_port}")
             result = client.login(username, password)
-        except Exception as exc:
+            saved_workspace = {
+                "workspace_id": workspace["workspace_id"],
+                "workspace_name": workspace["workspace_name"],
+                "company_name": workspace.get("company_name")
+                or workspace["workspace_name"],
+                "data_dir": str(data_dir),
+                "storage_location": str(storage_root),
+                "server_id": cfg.server_id,
+                "api_port": cfg.api_port,
+                "tftp_port": cfg.tftp_port,
+            }
+            try:
+                LocalWorkspaceRegistry(WORKSPACE_REGISTRY_PATH).save(saved_workspace)
+            except ValueError as exc:
+                logger.exception("Không lưu được thông tin Workspace")
+                messagebox.showwarning(
+                    "Workspace",
+                    f"Workspace đã tạo và đang chạy, nhưng không lưu được cấu hình "
+                    f"đăng nhập lần sau:\n{exc}",
+                )
+        except Exception as exc:  # noqa: BLE001 - report startup failures in the GUI
+            cleanup_error = ""
             try:
                 runtime.stop()
-            except Exception:
-                pass
+            except Exception as stop_exc:
+                logger.exception("Không dừng được runtime sau lỗi tạo Workspace")
+                cleanup_error = f"\nKhông dừng được runtime: {stop_exc}"
             messagebox.showerror(
                 "Không thể tạo Workspace",
                 f"Không thể tạo hoặc khởi động Workspace:\n{exc}\n\n"
                 "Nếu đây là lần thử trước đã tạo database, ứng dụng sẽ thử mở lại Workspace đó. "
-                "Nếu vẫn lỗi, hãy kiểm tra port 6971/6969 và quyền ghi thư mục lưu trữ.",
+                "Nếu vẫn lỗi, hãy kiểm tra port 6971/6969 và quyền ghi thư mục lưu trữ."
+                f"{cleanup_error}",
             )
             return
 
         self._server_runtime = runtime
+        self.workspace_data.update(saved_workspace)
         self.workspace_data["admin"] = {
             "username": username, "email": email,
         }
@@ -745,7 +979,7 @@ class TFTPApp(tk.Tk):
                     "permissions": result.get("permissions", []),
                 }
                 self._queue.put(("join_login_ok", (client, me)))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - forward login errors to the UI
                 self._queue.put(("admin_error", str(exc)))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -848,15 +1082,19 @@ class TFTPApp(tk.Tk):
 
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 14))
-        self._build_transfer_tab()
+        is_guest = str((self.admin_user or {}).get("role", "")).upper() == "GUEST"
+        if not is_guest:
+            self._build_transfer_tab()
         self._build_file_manager_tab()
-        self._build_dashboard_tab()
-        self._build_packet_tab()
-        self._build_users_tab()
-        self._build_employees_tab()
-        self._build_pxe_tab()
+        if not is_guest:
+            self._build_dashboard_tab()
+            self._build_packet_tab()
+            self._build_users_tab()
+            self._build_employees_tab()
+            self._build_pxe_tab()
 
-        self._hide_remote_field()
+        if not is_guest:
+            self._hide_remote_field()
 
     def _build_transfer_tab(self):
         tab = ttk.Frame(self.notebook, padding=6)
@@ -978,36 +1216,67 @@ class TFTPApp(tk.Tk):
             side=tk.LEFT, padx=12
         )
 
+        user = self.admin_user or {}
+        role = str(user.get("role", "")).upper()
+        permissions = set(user.get("permissions") or [])
+        self._fm_show_guest_access = (
+            self.admin is not None
+            and self.admin._enterprise_mode
+            and role in ("SUPER_ADMIN", "ADMIN")
+        )
+        columns = ["name", "type", "size", "modified", "path"]
+        headings = ["Tên", "Loại", "Dung lượng", "Cập nhật lúc", "Đường dẫn"]
+        widths = [230, 80, 100, 155, 320]
+        if self._fm_show_guest_access:
+            columns.append("guest_access")
+            headings.append("Guest tải được")
+            widths.append(120)
         tree_frame, self.fm_tree = self._tree(
-            tab,
-            ("name", "type", "size", "modified", "path"),
-            ("Tên", "Loại", "Dung lượng", "Cập nhật (UTC)", "Đường dẫn"),
-            (230, 80, 100, 180, 320),
-            height=15,
+            tab, tuple(columns), tuple(headings), tuple(widths), height=15
         )
         tree_frame.grid(row=2, column=0, sticky="nsew")
         self.fm_tree.tag_configure("dir", foreground="#0a6b3a")
         self.fm_tree.bind("<Double-1>", lambda _event: self._fm_enter_selected())
 
-        actions = ttk.Frame(tab)
-        actions.grid(row=3, column=0, sticky="ew", pady=6)
-        for text, command in (
-            ("Upload", self._fm_upload),
-            ("Download", self._fm_download),
-            ("Tạo thư mục", self._fm_mkdir),
-            ("Đổi tên", self._fm_rename),
-            ("Xóa", self._fm_delete),
-            ("Hash", self._fm_hash),
-            ("Verify", self._fm_verify),
-        ):
-            ttk.Button(actions, text=text, command=command).pack(
+        action_bar = ttk.Frame(tab)
+        action_bar.grid(row=3, column=0, sticky="ew", pady=6)
+        is_admin = role in ("SUPER_ADMIN", "ADMIN")
+        action_buttons = []
+        if is_admin or permissions.intersection({"files.download", "files.read"}):
+            action_buttons.append(("Tải xuống", self._fm_download))
+        if is_admin or "files.upload" in permissions:
+            action_buttons.append(("Tải lên", self._fm_upload))
+        if is_admin or permissions.intersection({"files.mkdir", "files.manage"}):
+            action_buttons.append(("Tạo thư mục", self._fm_mkdir))
+        if is_admin or permissions.intersection({"files.rename", "files.manage"}):
+            action_buttons.append(("Đổi tên", self._fm_rename))
+        if is_admin or "files.delete" in permissions:
+            action_buttons.append(("Xóa", self._fm_delete))
+        if is_admin or permissions.intersection({"files.read", "files.manage"}):
+            action_buttons.append(("SHA-256", self._fm_hash))
+        can_manage_guest_access = self._fm_show_guest_access
+        if can_manage_guest_access:
+            action_buttons.extend(
+                [
+                    ("Cấp quyền tải cho Guest", self._fm_allow_guest),
+                    ("Thu hồi quyền Guest", self._fm_revoke_guest),
+                ]
+            )
+        for text, command in action_buttons:
+            ttk.Button(action_bar, text=text, command=command).pack(
                 side=tk.LEFT, padx=3
             )
 
         ttk.Label(
             tab,
-            text="Mọi thao tác đi qua Admin API và StorageManager; "
-            "path traversal bị từ chối ở server.",
+            text=(
+                "Chọn file/thư mục rồi bấm Cấp quyền tải cho Guest; Guest đăng nhập "
+                "vào cùng Admin API và chỉ thấy/tải nội dung được cấp. Tải xuống tự "
+                "kiểm tra SHA-256."
+                if can_manage_guest_access
+                else "Tải xuống tự kiểm tra SHA-256. Guest chỉ thấy và tải nội dung "
+                "được admin cấp."
+            ),
         ).grid(row=4, column=0, sticky="w", pady=(4, 0))
 
     def _build_dashboard_tab(self):
@@ -1174,7 +1443,7 @@ class TFTPApp(tk.Tk):
         ttk.Combobox(
             create_bar,
             textvariable=self.user_new_role_var,
-            values=("ADMIN", "HR", "MANAGER", "TEAM_LEADER", "EMPLOYEE", "INTERN"),
+            values=("ADMIN", "EMPLOYEE", "GUEST"),
             width=9,
             state="readonly",
         ).pack(side=tk.LEFT, padx=4)
@@ -1200,7 +1469,7 @@ class TFTPApp(tk.Tk):
         ttk.Combobox(
             actions,
             textvariable=self.user_edit_role_var,
-            values=("ADMIN", "HR", "MANAGER", "TEAM_LEADER", "EMPLOYEE", "INTERN"),
+            values=("ADMIN", "EMPLOYEE", "GUEST"),
             width=9,
             state="readonly",
         ).pack(side=tk.LEFT, padx=4)
@@ -1216,6 +1485,11 @@ class TFTPApp(tk.Tk):
         ttk.Button(
             actions, text="Xóa", command=self._user_delete
         ).pack(side=tk.LEFT, padx=2)
+        ttk.Label(
+            tab,
+            text="Nhập username, password và chọn role EMPLOYEE hoặc GUEST để tạo tài khoản. "
+            "Guest chỉ xem/tải đường dẫn được cấp; nhiều phiên Guest có thể đăng nhập đồng thời.",
+        ).grid(row=3, column=0, sticky="w")
 
     def _build_pxe_tab(self):
         tab = ttk.Frame(self.notebook, padding=6)
@@ -1334,6 +1608,12 @@ class TFTPApp(tk.Tk):
                 self.status_var.set("Hoàn tất - 100%")
                 self.detail_var.set("Tốc độ: --   |   Còn lại: 0 giây")
                 messagebox.showinfo("Thành công", payload)
+                user = self.admin_user or {}
+                if (
+                    "stats.read" in set(user.get("permissions") or [])
+                    or str(user.get("role", "")).upper() in ("SUPER_ADMIN", "ADMIN")
+                ):
+                    self._refresh_dashboard()
             elif kind == "error":
                 self._set_busy(False)
                 if "cancel" in payload.lower():
@@ -1357,6 +1637,36 @@ class TFTPApp(tk.Tk):
                     f"({user.get('role')})"
                 )
                 self._refresh_after_login()
+            elif kind == "saved_workspace_login_ok":
+                dialog, client, result, workspace, runtime = payload
+                dialog.destroy()
+                self._server_runtime = runtime
+                self.workspace_data = workspace
+                self.admin = client
+                self.admin_user = {
+                    "username": result.get("username", "admin"),
+                    "role": result.get("role", "SUPER_ADMIN"),
+                    "permissions": result.get("permissions", []),
+                }
+                self.admin_url_var.set(client.base_url)
+                self.admin_user_var.set(self.admin_user["username"])
+                self._build_ui()
+                self.admin_status_var.set(
+                    f"Đăng nhập: {self.admin_user['username']} "
+                    f"({self.admin_user['role']})"
+                )
+                self._refresh_after_login()
+                messagebox.showinfo(
+                    "Workspace",
+                    f"Đã khôi phục Workspace {workspace['workspace_name']}.\n"
+                    "Dữ liệu và tài khoản cũ vẫn được giữ nguyên.",
+                )
+            elif kind == "saved_workspace_login_error":
+                dialog, status, button, error = payload
+                if dialog.winfo_exists():
+                    status.set(f"Đăng nhập thất bại: {error}")
+                    button.configure(state="normal")
+                    messagebox.showerror("Workspace", error, parent=dialog)
             elif kind == "join_login_ok":
                 client, user = payload
                 if getattr(self, "join_login_btn", None) is not None:
@@ -1393,8 +1703,16 @@ class TFTPApp(tk.Tk):
                 self._apply_fm_entries(payload)
             elif kind == "fm_refresh":
                 self._refresh_fm()
+            elif kind == "dashboard_refresh":
+                self._refresh_dashboard()
             elif kind == "users_refresh":
                 self._refresh_users()
+                user = self.admin_user or {}
+                permissions = set(user.get("permissions") or [])
+                if "employees.read" in permissions or str(
+                    user.get("role", "")
+                ).upper() in ("SUPER_ADMIN", "ADMIN"):
+                    self._refresh_employees()
             elif kind == "pxe_refresh":
                 self._refresh_pxe()
             elif kind == "fm_info":
@@ -1410,16 +1728,6 @@ class TFTPApp(tk.Tk):
                 text = f"{path}\nKết quả: {status}"
                 if expected:
                     text += f"\nClient: {expected}\nServer: {actual}"
-                self._append_log(text.replace("\n", " | "))
-                messagebox.showinfo("SHA-256", text)
-            elif kind == "fm_verify_server":
-                path, result = payload
-                self.fm_hash_var.set(f"{path}: {result.get('status')}")
-                text = (
-                    f"{path}\nKết quả: {result.get('status')}\n"
-                    f"Expected: {result.get('expected')}\n"
-                    f"Actual:   {result.get('actual')}"
-                )
                 self._append_log(text.replace("\n", " | "))
                 messagebox.showinfo("SHA-256", text)
             elif kind == "dashboard":
@@ -1697,9 +2005,21 @@ class TFTPApp(tk.Tk):
         if client is None:
             return
         target = self.fm_path_var.get() if path is None else path
+        show_guest_access = self._fm_show_guest_access
 
         def task():
-            return client.list_dir(target)
+            result = client.list_dir(target)
+            if show_guest_access:
+                status = client.guest_file_access(target)
+                guest_access = {
+                    item["relative_path"]: item["guest_can_download"]
+                    for item in status.get("entries", [])
+                }
+                for entry in result.get("entries", []):
+                    entry["guest_can_download"] = guest_access.get(
+                        entry.get("relative_path", ""), False
+                    )
+            return result
 
         self._start_admin_task(task, "fm_entries")
 
@@ -1713,17 +2033,19 @@ class TFTPApp(tk.Tk):
             relative = str(entry.get("relative_path", ""))
             is_dir = bool(entry.get("is_dir"))
             self._fm_by_iid[relative] = entry
+            values = (
+                entry.get("name", ""),
+                "Thư mục" if is_dir else "File",
+                "" if is_dir else self._format_bytes(entry.get("size", 0)),
+                _format_modified_at(entry.get("modified_at", "")),
+                relative,
+            )
+            if self._fm_show_guest_access:
+                values += (
+                    "Có" if entry.get("guest_can_download") else "Không",
+                )
             self.fm_tree.insert(
-                "",
-                tk.END,
-                iid=relative,
-                values=(
-                    entry.get("name", ""),
-                    "Thư mục" if is_dir else "File",
-                    "" if is_dir else self._format_bytes(entry.get("size", 0)),
-                    entry.get("modified_at", ""),
-                    relative,
-                ),
+                "", tk.END, iid=relative, values=values,
                 tags=("dir",) if is_dir else (),
             )
         self.fm_hash_var.set(f"{path or '/'}: {len(entries)} mục")
@@ -1811,6 +2133,7 @@ class TFTPApp(tk.Tk):
                     )
                 )
                 self._queue.put(("fm_refresh", None))
+                self._queue.put(("dashboard_refresh", None))
             except Exception as exc:  # noqa: BLE001
                 self._queue.put(("admin_error", str(exc)))
 
@@ -1852,10 +2175,42 @@ class TFTPApp(tk.Tk):
                         (remote, status, client_hash, server_hash or "--"),
                     )
                 )
+                self._queue.put(("dashboard_refresh", None))
             except Exception as exc:  # noqa: BLE001
                 self._queue.put(("admin_error", str(exc)))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _set_guest_access_for_selected(self, allowed: bool):
+        client = self._require_admin()
+        if client is None:
+            return
+        entry = self._selected_fm()
+        if entry is None:
+            return
+        path = str(entry.get("relative_path", ""))
+        item_type = "thư mục" if entry.get("is_dir") else "file"
+        action = "cấp" if allowed else "thu hồi"
+        if not messagebox.askyesno(
+            "Quyền Guest",
+            f"Bạn muốn {action} quyền xem/tải cho Guest trên {item_type}:\n{path}?\n\n"
+            "Nếu là thư mục, quyền áp dụng cho cả nội dung bên trong.",
+            parent=self,
+        ):
+            return
+        self._start_admin_action(
+            lambda: client.set_guest_file_access(path, allowed),
+            message=(
+                f"Đã {action} quyền Guest cho {path or '/'}."
+            ),
+            refresh="fm_refresh",
+        )
+
+    def _fm_allow_guest(self):
+        self._set_guest_access_for_selected(True)
+
+    def _fm_revoke_guest(self):
+        self._set_guest_access_for_selected(False)
 
     def _fm_mkdir(self):
         client = self._require_admin()
@@ -1942,30 +2297,6 @@ class TFTPApp(tk.Tk):
             return path, client.hash(path)
 
         self._start_admin_task(task, "fm_hash")
-
-    def _fm_verify(self):
-        client = self._require_admin()
-        if client is None:
-            return
-        entry = self._selected_fm()
-        if entry is None:
-            return
-        if entry.get("is_dir"):
-            messagebox.showwarning("SHA-256", "Chọn một file, không phải thư mục.")
-            return
-        expected = simpledialog.askstring(
-            "SHA-256",
-            "Nhập SHA-256 mong đợi (64 ký tự hex):",
-            parent=self,
-        )
-        if not expected:
-            return
-        path = entry.get("relative_path", "")
-
-        def task():
-            return path, client.verify(path, expected.strip())
-
-        self._start_admin_task(task, "fm_verify_server")
 
     # ------------------------------------------------------------------ #
     # Dashboard / Packet Analyzer / Users / PXE
@@ -2070,7 +2401,10 @@ class TFTPApp(tk.Tk):
         tab.rowconfigure(1, weight=1)
         bar = ttk.Frame(tab)
         bar.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        ttk.Label(bar, text="Danh sách hồ sơ nhân viên Enterprise").pack(side=tk.LEFT)
+        ttk.Label(
+            bar,
+            text="Danh sách tài khoản EMPLOYEE và hồ sơ nhân sự",
+        ).pack(side=tk.LEFT)
         ttk.Button(bar, text="Làm mới", command=self._refresh_employees).pack(side=tk.RIGHT)
         frame, self.employees_tree = self._tree(
             tab,
@@ -2092,7 +2426,37 @@ class TFTPApp(tk.Tk):
         if "employees.read" not in permissions and role not in ("SUPER_ADMIN", "ADMIN"):
             messagebox.showwarning("Nhân viên", "Tài khoản không có quyền xem danh sách nhân viên.")
             return
-        self._start_admin_task(client.list_employees, "employees")
+        can_list_users = (
+            "users.manage" in permissions or role in ("SUPER_ADMIN", "ADMIN")
+        )
+
+        def task():
+            employees = client.list_employees()
+            if not can_list_users:
+                return employees
+            profiles = {
+                str(employee.get("username", "")).casefold(): employee
+                for employee in employees
+                if employee.get("username")
+            }
+            for account in client.list_users():
+                username = str(account.get("username", ""))
+                if (
+                    str(account.get("role", "")).upper() == "EMPLOYEE"
+                    and username.casefold() not in profiles
+                ):
+                    employees.append(
+                        {
+                            "username": username,
+                            "full_name": "Chưa có hồ sơ",
+                            "email": "",
+                            "department": "",
+                            "position": "",
+                        }
+                    )
+            return employees
+
+        self._start_admin_task(task, "employees")
 
     def _apply_employees(self, employees):
         self.employees_tree.delete(*self.employees_tree.get_children())
@@ -2131,6 +2495,14 @@ class TFTPApp(tk.Tk):
     def _user_create(self):
         client = self._require_admin()
         if client is None:
+            return
+        if not client._enterprise_mode:
+            messagebox.showwarning(
+                "Người dùng",
+                "Tạo tài khoản theo role Admin/Employee/Guest cần đăng nhập "
+                "vào Enterprise Server.",
+                parent=self,
+            )
             return
         username = self.user_username_var.get().strip()
         password = self.user_password_var.get()

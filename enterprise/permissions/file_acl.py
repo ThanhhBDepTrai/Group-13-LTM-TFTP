@@ -59,6 +59,27 @@ class FileACL:
                 allowed = allowed or bool(r[column])
         return allowed
 
+    def can_read_tree(self, user: dict, path: str) -> bool:
+        """Return whether a directory or any descendant is readable by the user."""
+        target = normalize(path)
+        if self.check(user, target, "read"):
+            return True
+        prefix = target.rstrip("/") + "/"
+        subjects = {("user", user["username"]), ("role", user["role"])}
+        if user.get("department"):
+            subjects.add(("department", user["department"]))
+        with self.db.connect() as c:
+            rows = c.execute(
+                "SELECT path, subject_type, subject FROM file_permissions "
+                "WHERE can_read=1"
+            ).fetchall()
+        return any(
+            row["path"].startswith(prefix)
+            and (row["subject_type"], row["subject"]) in subjects
+            and self.check(user, row["path"], "read")
+            for row in rows
+        )
+
     def require(self, user, path, action, *, owner=None) -> None:
         if not self.check(user, path, action, owner=owner):
             raise EnterpriseError("Không có quyền với tệp/thư mục này", 403)

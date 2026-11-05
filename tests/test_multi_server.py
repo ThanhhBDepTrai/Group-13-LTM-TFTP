@@ -3,13 +3,17 @@
 import socket
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
+from admin_client import AdminClient
 from client.login_manager import LoginManager
 from client.server_registry import ServerRegistry
 from client.session_manager import SessionManager
 from enterprise.errors import EnterpriseError
 from enterprise.server_runtime import ServerRuntime
+from tftp_client import TFTPClient
+from tftp_gui import _format_modified_at
 
 
 def free_port(udp=False):
@@ -18,7 +22,54 @@ def free_port(udp=False):
         return s.getsockname()[1]
 
 
+def test_file_manager_timestamp_displays_local_date_and_time_only():
+    expected = datetime.fromisoformat("2026-11-05T05:13:27+00:00").astimezone()
+    assert _format_modified_at("2026-11-05T05:13:27+00:00") == expected.strftime(
+        "%d/%m/%Y %H:%M:%S"
+    )
+    assert _format_modified_at("2026-11-05T12:13:27") == "05/11/2026 12:13:27"
+    assert _format_modified_at("invalid timestamp") == "invalid timestamp"
+
+
 class MultiServerTests(unittest.TestCase):
+    def test_workspace_file_manager_transfers_appear_in_dashboard(self):
+        tmp = Path(tempfile.mkdtemp())
+        runtime = ServerRuntime(tmp / "workspace")
+        try:
+            cfg = runtime.create(
+                "Workspace",
+                "127.0.0.1",
+                free_port(),
+                free_port(udp=True),
+                "superadmin",
+                "MatKhauA1234",
+            )
+            client = AdminClient(f"http://127.0.0.1:{cfg.api_port}")
+            client.login("superadmin", "MatKhauA1234")
+            client.upload("report.txt", b"report contents")
+            self.assertEqual(client.download("report.txt"), b"report contents")
+
+            tftp_source = tmp / "tftp-upload.txt"
+            tftp_source.write_bytes(b"uploaded over TFTP")
+            TFTPClient("127.0.0.1", cfg.tftp_port).upload(
+                tftp_source, "tftp-upload.txt"
+            )
+
+            dashboard = client.dashboard()
+            self.assertEqual(dashboard["stats"]["total_transfers"], 3)
+            self.assertEqual(dashboard["stats"]["uploads"], 2)
+            self.assertEqual(dashboard["stats"]["downloads"], 1)
+            self.assertEqual(
+                {item["direction"] for item in dashboard["recent"]},
+                {"upload", "download"},
+            )
+            self.assertIn(
+                "tftp-upload.txt",
+                {item["filename"] for item in dashboard["recent"]},
+            )
+        finally:
+            runtime.stop()
+
     def test_two_independent_servers(self):
         tmp = Path(tempfile.mkdtemp())
         reg, sessions = ServerRegistry(tmp / "reg.json"), SessionManager()

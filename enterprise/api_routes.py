@@ -51,6 +51,48 @@ def handle(handler, svc, method: str, path: str, query: dict) -> bool:
         b = handler._json_body()
         svc.set_role(user, str(b.get("username", "")), str(b.get("role", "")))
         send(200, {"status": "ok"})
+    elif sub == "/guest-access" and method == "GET":
+        if user.get("role") not in ("SUPER_ADMIN", "ADMIN"):
+            raise EnterpriseError("Chỉ Admin mới được xem quyền tải của Guest", 403)
+        path_values = query.get("path", [""])
+        path = str(path_values[0]) if path_values else ""
+        guest = {"username": "", "role": "GUEST"}
+        entries = handler.server.app.storage.list_dir(path)
+        send(
+            200,
+            {
+                "path": handler.server.app.storage.clean_relative(path),
+                "entries": [
+                    {
+                        "relative_path": entry.relative_path,
+                        "guest_can_download": (
+                            svc.acl.can_read_tree(guest, entry.relative_path)
+                            if entry.is_dir
+                            else svc.acl.check(guest, entry.relative_path, "read")
+                        ),
+                    }
+                    for entry in entries
+                ],
+            },
+        )
+    elif sub == "/guest-access" and method == "POST":
+        if user.get("role") not in ("SUPER_ADMIN", "ADMIN"):
+            raise EnterpriseError("Chỉ Admin mới được cấp quyền tải cho Guest", 403)
+        b = handler._json_body()
+        path = str(b.get("path", ""))
+        if bool(b.get("allowed", True)):
+            svc.acl.set(
+                path, "role", "GUEST", read=True, write=False, delete=False
+            )
+        else:
+            svc.acl.remove(path, "role", "GUEST")
+        svc.audit.log(
+            user["username"],
+            "guest.file_access",
+            path,
+            "allowed" if bool(b.get("allowed", True)) else "revoked",
+        )
+        send(200, {"path": path, "guest_read": bool(b.get("allowed", True))})
     elif sub == "/join-codes" and method == "POST":
         b = handler._json_body()
         code = svc.create_join_code(user, role=str(b.get("role", "EMPLOYEE")),

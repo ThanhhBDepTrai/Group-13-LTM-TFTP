@@ -14,6 +14,7 @@ import json
 import logging
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
@@ -155,6 +156,52 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
                 app.enterprise.permissions.require(user, permission)
             return user, token
 
+    def _enterprise_principal(self, token: str) -> dict | None:
+        app = self.server.app
+        if app.enterprise is None:
+            return None
+        try:
+            return app.enterprise.authenticate(token)
+        except EnterpriseError:
+            return None
+
+    def _guest_can_read_tree(self, user: dict | None, path: str) -> bool:
+        app = self.server.app
+        if user is None or user.get("role") != "GUEST":
+            return True
+        return app.enterprise.acl.can_read_tree(user, path)
+
+    def _require_guest_read(self, user: dict | None, path: str) -> None:
+        app = self.server.app
+        if user is not None and user.get("role") == "GUEST":
+            app.enterprise.acl.require(user, path, "read")
+
+    def _record_file_transfer(
+        self,
+        filename: str,
+        direction: str,
+        bytes_total: int,
+        started: float,
+        *,
+        status: str = "success",
+        error: str | None = None,
+    ) -> None:
+        metrics = self.server.app.metrics
+        if metrics is None:
+            return
+        try:
+            metrics.record(
+                client_ip=str(self.client_address[0]),
+                filename=filename,
+                direction=direction,
+                bytes_total=bytes_total,
+                duration=max(time.monotonic() - started, 0.0),
+                status=status,
+                error=error,
+            )
+        except Exception:
+            logger.exception("Cannot record Admin API file transfer metrics")
+
     # ------------------------------------------------------------------ #
     # Dispatch
     # ------------------------------------------------------------------ #
@@ -242,9 +289,20 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
 
         # ---------------- files ----------------
         if path == "/api/files" and method == "GET":
-            self._authenticate("files.list")
+            _caller, token = self._authenticate("files.list")
+            enterprise_user = self._enterprise_principal(token)
             relative = self._first(query, "path", "")
+            if not self._guest_can_read_tree(enterprise_user, relative):
+                raise EnterpriseError("Không có quyền xem thư mục này", 403)
             entries = app.storage.list_dir(relative)
+            if enterprise_user is not None and enterprise_user.get("role") == "GUEST":
+                entries = [
+                    entry
+                    for entry in entries
+                    if self._guest_can_read_tree(
+                        enterprise_user, entry.relative_path
+                    )
+                ]
             self._send_json(
                 200,
                 {
@@ -255,23 +313,34 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/files/search" and method == "GET":
-            self._authenticate("files.list")
+            _caller, token = self._authenticate("files.list")
+            enterprise_user = self._enterprise_principal(token)
             needle = self._first(query, "q", "")
             entries = app.storage.search(needle, limit=int(self._first(query, "limit", "200")))
+            if enterprise_user is not None and enterprise_user.get("role") == "GUEST":
+                entries = [
+                    entry
+                    for entry in entries
+                    if self._guest_can_read_tree(
+                        enterprise_user, entry.relative_path
+                    )
+                ]
             self._send_json(200, {"query": needle, "entries": [e.to_dict() for e in entries]})
             return
 
         if path == "/api/files/metadata" and method == "GET":
-            self._authenticate("files.read")
+            _caller, token = self._authenticate("files.read")
             relative = self._first(query, "path")
+            self._require_guest_read(self._enterprise_principal(token), relative)
             include_hash = self._first(query, "hash", "0") not in ("0", "false", "")
             entry = app.storage.metadata(relative, include_hash=include_hash)
             self._send_json(200, {"entry": entry.to_dict()})
             return
 
         if path == "/api/files/hash" and method == "GET":
-            self._authenticate("files.read")
+            _caller, token = self._authenticate("files.read")
             relative = self._first(query, "path")
+            self._require_guest_read(self._enterprise_principal(token), relative)
             self._send_json(
                 200,
                 {
@@ -282,10 +351,21 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/files/download" and method == "GET":
-            self._authenticate("files.download")
+            _caller, token = self._authenticate("files.download")
             relative = self._first(query, "path")
-            entry = app.storage.metadata(relative, include_hash=True)
-            body = app.storage.read_bytes(relative)
+            self._require_guest_read(self._enterprise_principal(token), relative)
+            started = time.monotonic()
+            try:
+                entry = app.storage.metadata(relative, include_hash=True)
+                body = app.storage.read_bytes(relative)
+            except Exception as exc:
+                self._record_file_transfer(
+                    relative, "download", 0, started, status="failed", error=str(exc)
+                )
+                raise
+            self._record_file_transfer(
+                relative, "download", len(body), started
+            )
             self._send_bytes(
                 200,
                 body,
@@ -298,13 +378,24 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
             self._authenticate("files.upload")
             relative = self._first(query, "path")
             body = self._read_body()
-            entry = app.storage.write_bytes(relative, body, overwrite=True)
+            started = time.monotonic()
+            try:
+                entry = app.storage.write_bytes(relative, body, overwrite=True)
+            except Exception as exc:
+                self._record_file_transfer(
+                    relative, "upload", 0, started, status="failed", error=str(exc)
+                )
+                raise
+            self._record_file_transfer(relative, "upload", len(body), started)
             self._send_json(201, {"entry": entry.to_dict(), "sha256": entry.sha256})
             return
 
         if path == "/api/files/verify" and method == "POST":
-            self._authenticate("files.read")
+            _caller, token = self._authenticate("files.read")
             body = self._json_body()
+            self._require_guest_read(
+                self._enterprise_principal(token), str(body.get("path", ""))
+            )
             result = app.storage.verify(
                 str(body.get("path", "")), str(body.get("sha256", ""))
             )

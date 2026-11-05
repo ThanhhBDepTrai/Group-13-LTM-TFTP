@@ -206,6 +206,20 @@ class AdminClient:
             "POST", "/api/ent/users/role", json_body={"username": username, "role": role.upper()}
         )
 
+    def set_guest_file_access(self, path: str, allowed: bool = True) -> dict:
+        return self._request(
+            "POST",
+            "/api/ent/guest-access",
+            json_body={"path": path, "allowed": allowed},
+        )
+
+    def guest_file_access(self, path: str = "") -> dict:
+        return self._request(
+            "GET",
+            "/api/ent/guest-access",
+            params={"path": path},
+        )
+
     def set_user_active(self, username: str, active: bool) -> dict:
         return self._request(
             "POST",

@@ -49,6 +49,14 @@ class EnterpriseTests(unittest.TestCase):
             self.svc.login("root", "RootPass123")
         self.assertEqual(ctx.exception.status, 429)
 
+    def test_guest_login_sessions_are_independent(self):
+        self.user("guest1", "GUEST")
+        first = self.svc.login("guest1", "Password123")
+        second = self.svc.login("guest1", "Password123")
+        self.assertNotEqual(first["token"], second["token"])
+        self.assertEqual(self.svc.authenticate(first["token"])["role"], "GUEST")
+        self.assertEqual(self.svc.authenticate(second["token"])["role"], "GUEST")
+
     def test_join_code_single_use_and_no_super_admin(self):
         code = self.svc.create_join_code(self.root, role="EMPLOYEE")
         self.svc.join(code, "nv1", "Password123")
@@ -161,6 +169,28 @@ class RegistryTests(unittest.TestCase):
         reg.remove("SRV-0123ABCD")
         self.assertEqual(reg.list(), [])
 
+    def test_local_workspace_registry_roundtrip_excludes_credentials(self):
+        from enterprise.workspace.local_workspace_registry import LocalWorkspaceRegistry
+
+        path = Path(tempfile.mkdtemp()) / "workspaces.json"
+        registry = LocalWorkspaceRegistry(path)
+        workspace = {
+            "workspace_id": "company-a",
+            "workspace_name": "Company A",
+            "company_name": "Company A Ltd",
+            "data_dir": "C:/TFTPPro/servers/company-a",
+            "storage_location": "C:/CompanyFiles",
+            "server_id": "SRV-0123ABCD",
+            "api_port": 6971,
+            "tftp_port": 6969,
+            "password": "must-not-be-saved",
+        }
+
+        registry.save(workspace)
+
+        self.assertEqual(registry.list()[0]["workspace_id"], "company-a")
+        self.assertNotIn("password", path.read_text(encoding="utf-8"))
+
 
 class ApiTests(unittest.TestCase):
     def test_admin_client_creates_enterprise_user(self):
@@ -184,6 +214,74 @@ class ApiTests(unittest.TestCase):
                 "created-via-api",
                 {user["username"] for user in client.list_users()},
             )
+        finally:
+            api.stop()
+
+    def test_guest_acl_filters_listing_and_downloads_only_granted_paths(self):
+        from admin_api import AdminAPIServer
+        from admin_client import AdminAPIError, AdminClient
+        from auth import AuthManager
+        from storage_manager import StorageManager
+
+        svc, tmp = make_service()
+        svc.accounts.create_user("shared-guest", "GuestPass123", "GUEST")
+        storage = StorageManager(Path(tmp) / "legacy")
+        storage.ensure_layout()
+        storage.write_bytes("shared/public.txt", b"public")
+        storage.write_bytes("private.txt", b"private")
+        api = AdminAPIServer(
+            storage,
+            AuthManager(Path(tmp) / "legacy.db"),
+            enterprise=svc,
+            host="127.0.0.1",
+            port=0,
+        )
+        api.start()
+        try:
+            admin = AdminClient(api.url)
+            admin.login("root", "RootPass123")
+            admin.set_guest_file_access("shared", True)
+            access = {
+                entry["relative_path"]: entry["guest_can_download"]
+                for entry in admin.guest_file_access()["entries"]
+            }
+            self.assertTrue(access["shared"])
+            self.assertFalse(access["private.txt"])
+
+            guest = AdminClient(api.url)
+            session_one = guest.login("shared-guest", "GuestPass123")
+            second_guest = AdminClient(api.url)
+            session_two = second_guest.login("shared-guest", "GuestPass123")
+            self.assertNotEqual(session_one["token"], session_two["token"])
+
+            self.assertEqual(
+                [entry["name"] for entry in guest.list_dir()["entries"]],
+                ["shared"],
+            )
+            self.assertEqual(
+                [entry["name"] for entry in guest.list_dir("shared")["entries"]],
+                ["public.txt"],
+            )
+            self.assertEqual(guest.download("shared/public.txt"), b"public")
+            with self.assertRaises(AdminAPIError) as denied:
+                guest.download("private.txt")
+            self.assertEqual(denied.exception.status, 403)
+            with self.assertRaises(AdminAPIError) as upload_denied:
+                guest.upload("shared/new.txt", b"no")
+            self.assertEqual(upload_denied.exception.status, 403)
+            with self.assertRaises(AdminAPIError) as listing_denied:
+                guest.guest_file_access()
+            self.assertEqual(listing_denied.exception.status, 403)
+
+            admin.set_guest_file_access("shared", False)
+            access_after_revoke = {
+                entry["relative_path"]: entry["guest_can_download"]
+                for entry in admin.guest_file_access()["entries"]
+            }
+            self.assertFalse(access_after_revoke["shared"])
+            with self.assertRaises(AdminAPIError) as revoked:
+                guest.download("shared/public.txt")
+            self.assertEqual(revoked.exception.status, 403)
         finally:
             api.stop()
 

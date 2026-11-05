@@ -14,6 +14,8 @@ from auth import AuthManager
 from enterprise.errors import EnterpriseError
 from enterprise.server.server_config import ServerConfig as EfmServerConfig
 from enterprise.service import EnterpriseService
+from metrics import MetricsCollector
+from packet_trace import PacketTracer
 from tftp_server import ServerConfig as TftpConfig
 from tftp_server import TFTPServer
 
@@ -69,10 +71,17 @@ class ServerRuntime:
                 "Database đã tồn tại nhưng chưa có cấu hình Server hoàn chỉnh. "
                 "Hãy sao lưu thư mục dữ liệu trước khi khởi tạo lại.", 409
             )
-        tftp = TFTPServer(TftpConfig(host=cfg.host, port=cfg.tftp_port, root=self.files_root))
+        metrics = MetricsCollector(self.data_dir / "metrics.db")
+        tracer = PacketTracer()
+        tftp = TFTPServer(
+            TftpConfig(host=cfg.host, port=cfg.tftp_port, root=self.files_root),
+            metrics=metrics,
+            tracer=tracer,
+        )
         tftp.storage.ensure_layout()
         api = AdminAPIServer(tftp.storage, AuthManager(self.data_dir / "legacy_auth.db"),
-                             enterprise=self.service, host=cfg.host, port=cfg.api_port)
+                             metrics=metrics, tracer=tracer, enterprise=self.service,
+                             host=cfg.host, port=cfg.api_port)
         api.start()
         thread = threading.Thread(target=tftp.serve_forever, name="efm-tftp", daemon=True)
         thread.start()

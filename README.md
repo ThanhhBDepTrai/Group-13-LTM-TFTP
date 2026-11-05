@@ -6,9 +6,11 @@ thích CLI/GUI cũ, đồng thời bổ sung RFC 7440, quản lý file/người 
 dashboard, packet analyzer và boot profile PXE. Chế độ Enterprise bổ sung
 Workspace riêng, tài khoản `SUPER_ADMIN` và các role doanh nghiệp.
 
-> TFTP không có xác thực/mã hóa tích hợp. Không mở TFTP hoặc Admin API ra
-> Internet. Admin API mặc định chỉ bind `127.0.0.1`; chỉ mở trong LAN tin cậy
-> khi thực sự cần và luôn dùng mật khẩu mạnh.
+> TFTP không có xác thực/mã hóa tích hợp. Không mở TFTP hoặc Admin API trực tiếp
+> ra Internet. Workspace tạo từ `tftp_gui.py` hiện chỉ bind `127.0.0.1`, nghĩa là
+> chỉ máy đang chạy ứng dụng truy cập được; mở firewall không làm ứng dụng tự
+> truy cập được từ máy khác. Muốn dùng từ xa cần triển khai mạng/VPN và cấu hình
+> server phù hợp trước.
 
 ## 1. Tính năng
 
@@ -19,30 +21,45 @@ Workspace riêng, tài khoản `SUPER_ADMIN` và các role doanh nghiệp.
 - Ghi file nguyên tử và kiểm tra path traversal/symlink qua `StorageManager`.
 - Admin API HTTP tách khỏi TFTP, token Bearer; hỗ trợ tài khoản TFTP legacy và
   tài khoản Enterprise (`SUPER_ADMIN`, `ADMIN`, `HR`, `MANAGER`, `TEAM_LEADER`,
-  `EMPLOYEE`, `INTERN`) trên các API tương ứng.
+  `EMPLOYEE`, `INTERN`, `GUEST`) trên các API tương ứng.
 - File Manager: list, search, metadata, upload, download, rename, mkdir, delete.
+- Enterprise Guest chỉ xem/tải file được Admin cấp qua Admin API; quyền Guest
+  không áp dụng cho giao thức TFTP thuần.
 - SHA-256: hash file, upload/download có đối chiếu `VERIFIED` / `MISMATCH`.
 - Dashboard metrics và Packet Analyzer từ trace nội bộ của Client/Server.
 - PXE profile BIOS/UEFI, kiểm tra boot file; **không** chạy DHCP server.
-- GUI sáu tab: Truyền file, File Manager, Dashboard, Packet Analyzer, Người dùng, PXE.
+- GUI có các tab Truyền file, File Manager, Dashboard, Packet Analyzer, Người dùng,
+  Nhân viên và PXE (Guest chỉ thấy File Manager).
 
 ## 2. Yêu cầu
 
 - Windows (GUI đã được kiểm tra trên Windows), Python 3.10 trở lên.
-- Không cần thư viện bên thứ ba để chạy ứng dụng.
-- Kiểm thử/dev: `pytest`, `ruff`.
+- Tkinter (thường được cài kèm Python trên Windows; chọn mục Tcl/Tk khi cài Python).
+- Chạy ứng dụng không cần thư viện bên thứ ba; `pytest` và `ruff` chỉ dùng để test/lint.
 
 ## 3. Cài đặt
 
+Clone repository, sau đó chạy trong thư mục dự án:
+
 ```powershell
+git clone https://github.com/ThanhhBDepTrai/Group-13-LTM-TFTP.git
+Set-Location Group-13-LTM-TFTP
 python -m venv .venv
 .venv\Scripts\activate
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
-## 4. Chạy nhanh
+Nếu PowerShell chặn lệnh activate, có thể gọi Python trong virtual environment
+trực tiếp mà không activate:
 
-### Chạy giao diện Enterprise (khuyến nghị để tạo tài khoản quản trị)
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe tftp_gui.py
+```
+
+## 4. Chạy ứng dụng
+
+### Workspace Enterprise (khuyến nghị)
 
 ```powershell
 python tftp_gui.py
@@ -53,20 +70,47 @@ python tftp_gui.py
 1. Chọn **Create Server** để tạo Workspace mới.
 2. Nhập thông tin Workspace và thư mục lưu file.
 3. Tạo tài khoản `SUPER_ADMIN` (mật khẩu tối thiểu 8 ký tự).
-4. Sau khi vào giao diện, mở tab **Người dùng** để tạo tài khoản và chọn role
-   phù hợp.
+4. Để tạo nhân viên/Guest, mở tab **Người dùng**, nhập username/mật khẩu, chọn
+   role rồi bấm **Tạo**. Tạo hồ sơ cá nhân ở tab **Nhân viên** là bước riêng,
+   không bắt buộc để tài khoản đăng nhập được.
+5. Để cho Guest tải file, chọn file/thư mục trong **File Manager**, bấm
+   **Cấp quyền tải cho Guest**. Cột trạng thái chỉ Admin thấy; quyền trên thư
+   mục áp dụng cho nội dung bên trong.
+6. Lần sau mở ứng dụng, chọn **LOGIN TO SAVED WORKSPACE**, chọn Workspace và
+   đăng nhập bằng tài khoản đã tạo. Database tài khoản nằm ở
+   `%APPDATA%\TFTPPro\servers\<workspace_id>\efm.db`; registry lưu cấu hình,
+   không lưu mật khẩu. Thư mục file là vị trí bạn chọn khi tạo Workspace.
+   Hãy sao lưu cả thư mục dữ liệu và thư mục file nếu muốn chuyển Workspace
+   sang máy khác; GitHub không lưu các dữ liệu này.
 
-Server/API chạy trên máy cục bộ với mặc định API `127.0.0.1:6971`, TFTP
-`127.0.0.1:6969`. Để kết nối Workspace đã có, chọn **Join Server** và nhập địa
-chỉ API cùng tài khoản được cấp. Chỉ mở server tới máy khác khi cấu hình host,
-firewall và mạng phù hợp.
+**Lưu ý:** Workspace này mặc định dùng API `127.0.0.1:6971` và TFTP
+`127.0.0.1:6969`. Chỉ máy đang chạy `tftp_gui.py` mới truy cập được. Khi đóng
+ứng dụng, server dừng nhưng database và tài khoản vẫn được giữ lại.
 
-### Chạy TFTP Pro độc lập
+Để một client khác **kết nối đến server đang chạy**, chọn **JOIN SERVER** và
+nhập URL cùng tài khoản đã được cấp. Tuy nhiên, với cấu hình Workspace hiện tại,
+client khác không thể kết nối qua LAN/Internet vì server chỉ bind localhost.
+Firewall đơn thuần không khắc phục được giới hạn bind này.
 
-### Cách khuyến nghị: một tiến trình cho TFTP + Admin API
+> Dùng `python tftp_gui.py` cho luồng Workspace, File Manager, quyền Guest và
+> tài khoản Enterprise. `efm_app.py` là giao diện/luồng khác, không thay thế đầy
+> đủ các màn hình File Manager của `tftp_gui.py`.
+
+#### Khắc phục nhanh khi không đăng nhập được
+
+- Nếu thấy `WinError 10061` / “actively refused”, API chưa chạy hoặc URL/port
+  không đúng. Trên máy đã tạo Workspace, chọn **LOGIN TO SAVED WORKSPACE** để
+  khởi động lại server. **JOIN SERVER** chỉ kết nối tới server đang chạy, không
+  khởi động server giúp bạn.
+- Nếu màn hình đăng nhập báo sai tài khoản/mật khẩu, kiểm tra bạn đang chọn
+  đúng Workspace và dùng đúng role/tài khoản đã tạo trong tab **Người dùng**.
+- Máy khác hiện không kết nối được Workspace tạo bằng GUI vì API/TFTP chỉ bind
+  localhost. Cùng Wi-Fi hoặc mở firewall không thay đổi giới hạn này.
+
+### TFTP Pro legacy (TFTP + Admin API)
 
 ```powershell
-# Đặt mật khẩu admin trước lần chạy đầu tiên (khuyến nghị)
+# Chạy tại thư mục dự án. Đổi mật khẩu mặc định trước khi dùng.
 $env:TFTP_ADMIN_PASSWORD = "MatKhauManh123!"
 python tftp_pro.py
 ```
@@ -78,29 +122,41 @@ Mặc định:
 - Metrics SQLite: `tftp_admin.metrics.db` (cùng thư mục với DB admin).
 - PXE profile: `pxe_profiles.json`.
 
-Chạy tách dịch vụ (vẫn được hỗ trợ):
+Legacy TFTP mặc định lắng nghe TFTP trên mọi network interface, nhưng Admin API
+chỉ lắng nghe localhost. Đây là chế độ TFTP cũ, **không** phải cách bật truy cập
+LAN cho Workspace Enterprise.
+
+Chế độ này dùng hệ tài khoản legacy riêng trong `tftp_admin.db` (`admin/user/guest`),
+không dùng tài khoản Enterprise trong Workspace và không hỗ trợ ACL Guest của
+Workspace. Nếu database legacy chưa có tài khoản, chương trình tạo `admin` bằng
+giá trị `TFTP_ADMIN_PASSWORD`; nếu không đặt biến này, mật khẩu mặc định là
+`admin` và cần đổi ngay. File/database được lưu tương đối với thư mục chạy lệnh.
+
+Chạy dịch vụ legacy tách riêng (tùy chọn):
 
 ```powershell
 python tftp_server.py
 python admin_api.py --root server_storage --db tftp_admin.db
 ```
 
-Chạy GUI:
-
-```powershell
-python tftp_gui.py
-```
-
-`tftp_pro.py` và `admin_api.py` dùng hệ thống tài khoản legacy `admin/user/guest`;
-chúng độc lập với database tài khoản Enterprise được tạo trong Workspace. Lần
-đầu chạy chế độ legacy, nếu database chưa có tài khoản, chương trình tạo
-`admin` với mật khẩu lấy từ biến môi trường `TFTP_ADMIN_PASSWORD`, hoặc fallback
-`admin`. Log sẽ cảnh báo khi dùng mật khẩu mặc định; hãy đổi ngay trong tab
-**Người dùng** hoặc qua API.
+Không chạy `tftp_pro.py` cùng lúc với `tftp_gui.py` trên cùng cổng mặc định
+`6969`/`6971`; một trong hai tiến trình sẽ không thể bind cổng.
 
 ## 5. Đăng nhập Admin API
 
-Ví dụ PowerShell:
+Ví dụ PowerShell cho tài khoản Enterprise trong Workspace:
+
+```powershell
+$login = Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:6971/api/ent/login `
+  -ContentType "application/json" `
+  -Body '{"username":"superadmin","password":"MatKhauWorkspace!"}'
+
+$headers = @{ Authorization = "Bearer $($login.token)" }
+Invoke-RestMethod -Uri http://127.0.0.1:6971/api/ent/me -Headers $headers
+```
+
+Ví dụ tiếp theo dùng tài khoản legacy của `tftp_pro.py`:
 
 ```powershell
 $login = Invoke-RestMethod -Method Post `
@@ -130,15 +186,22 @@ Thanh trên cùng cấu hình TFTP IP, Port, Window và Admin API URL/tài kho�
 | Tab | Chức năng |
 |---|---|
 | **Truyền file** | Upload/download TFTP, tiến trình, tốc độ, ETA, log, cancel. Danh sách file lấy từ dịch vụ listing cũ (TCP `port+1`). |
-| **File Manager** | Duyệt/tìm file qua Admin API; upload, download, rename, tạo thư mục, xóa, xem metadata và SHA-256. |
-| **Dashboard** | Số client hoạt động, tổng phiên, dung lượng, tốc độ trung bình, timeout/retry, phiên gần đây. |
+| **File Manager** | Duyệt/tìm file qua Admin API; upload, download (tự kiểm tra SHA-256), tạo thư mục, đổi tên, xóa và xem SHA-256. Admin có cột riêng cho biết Guest có thể tải file/thư mục nào và có thể cấp/thu hồi quyền. Ngày sửa hiển thị ngày giờ địa phương. |
+| **Dashboard** | Thống kê TFTP và upload/download qua File Manager: client đang hoạt động, tổng phiên, dung lượng, tốc độ, timeout/retry và lịch sử. |
 | **Packet Analyzer** | Lọc trace theo opcode/chiều, xem block, payload, source/destination và thống kê gói. |
-| **Người dùng** | Quản lý tài khoản Enterprise theo quyền; các role hiện có gồm `ADMIN`, `HR`, `MANAGER`, `TEAM_LEADER`, `EMPLOYEE`, `INTERN`. |
+| **Người dùng** | Quản lý tài khoản Enterprise; giao diện ưu tiên `ADMIN`, `EMPLOYEE` và `GUEST`. Các role Enterprise khác vẫn được giữ để tương thích. Admin tạo nhân viên hoặc Guest từng tài khoản bằng form tạo tài khoản. |
 | **PXE** | Tạo/sửa/xóa profile BIOS/UEFI, chọn boot file mặc định, kiểm tra file tồn tại. |
+| **Nhân viên** | Danh sách hồ sơ nhân sự và tài khoản có role `EMPLOYEE`; tài khoản chưa có hồ sơ vẫn hiển thị username. |
 
 Upload/download TFTP vẫn hoạt động khi chưa đăng nhập Admin API. Đăng nhập để
 dùng File Manager, Dashboard, Packet Analyzer, quản lý người dùng/PXE và để
 đối chiếu SHA-256 với Server sau khi truyền.
+
+Guest đăng nhập bằng tài khoản Enterprise `GUEST`, chỉ thấy và tải các file/thư
+mục được admin cấp trong File Manager. Nhiều phiên đăng nhập Guest có thể hoạt
+động đồng thời. Giới hạn này được thực thi trên Admin API; giao thức TFTP thuần
+không có xác thực, vì vậy không dùng TFTP để phục vụ Guest hoặc mở các cổng dịch
+vụ ra Internet.
 
 ## 7. CLI
 
@@ -205,7 +268,7 @@ thể báo thiếu file cho đến khi boot file được upload. Xem
 
 | Thông số | Mặc định | Ghi đè |
 |---|---|---|
-| TFTP host/port | `0.0.0.0:6969` | `--host`, `--port` |
+| TFTP host/port (legacy CLI) | `0.0.0.0:6969` | `--host`, `--port` |
 | Client host/port | `127.0.0.1:6969` | `--host`, `--port` |
 | Thư mục chia sẻ | `server_storage` | `--root` |
 | Block size | `512` | `--blksize` |
@@ -213,7 +276,7 @@ thể báo thiếu file cho đến khi boot file được upload. Xem
 | Max clients | `20` | `--max-clients` |
 | Client windowsize | `1` | `--windowsize` |
 | Server windowsize tối đa | `16` | `--windowsize` |
-| Admin API | `127.0.0.1:6971` | `--admin-host`, `--admin-port` |
+| Admin API (legacy CLI) | `127.0.0.1:6971` | `--admin-host`, `--admin-port` |
 | Admin DB | `tftp_admin.db` | `--admin-db`, `--db` |
 | Admin body tối đa | `64 MiB` | hằng số `DEFAULT_MAX_ADMIN_BODY` |
 | Token TTL | `8 giờ` | `AuthManager(token_ttl=...)` |
@@ -225,8 +288,11 @@ lệch cổng hoặc block size.
 ## 12. Bảo mật và giới hạn
 
 - Không expose TFTP/Admin API ra Internet; ưu tiên LAN/lab hoặc VPN.
-- Admin API mặc định chỉ localhost. Nếu bind địa chỉ khác, chương trình cảnh báo;
-  phải dùng mật khẩu mạnh, firewall và mạng tin cậy.
+- Workspace tạo từ `tftp_gui.py` hiện chỉ bind localhost. Không có tùy chọn GUI
+  để bật LAN; firewall đơn thuần không cho máy khác kết nối.
+- `tftp_pro.py` cho phép cấu hình bind Admin API bằng `--admin-host`, nhưng đổi
+  bind/firewall không mã hóa HTTP và không làm TFTP an toàn. Chỉ thử nghiệm
+  trong mạng cô lập, không mở trực tiếp ra Internet.
 - Mật khẩu lưu bằng PBKDF2-HMAC-SHA256 + salt; token lưu dạng SHA-256, không lưu
   token gốc. Log không ghi mật khẩu/token.
 - Mọi đường dẫn file đi qua `StorageManager`; `..`, đường dẫn tuyệt đối, ổ đĩa
@@ -238,11 +304,12 @@ lệch cổng hoặc block size.
 
 ```powershell
 python -m pytest -q
-python -m ruff check .
 ```
 
-Bộ test bao phủ packet/option, windowsize/fallback, storage/path traversal, auth,
-Admin API, metrics, packet analyzer, SHA-256, PXE và cấu hình mặc định.
+Bộ test bao phủ packet/option, windowsize/fallback, storage/path traversal,
+Enterprise và legacy auth/API, metrics, packet analyzer, SHA-256, PXE và cấu hình
+mặc định. `ruff` có thể dùng riêng để kiểm tra style; lệnh này không cần để chạy
+ứng dụng.
 
 ## 14. Tài liệu
 

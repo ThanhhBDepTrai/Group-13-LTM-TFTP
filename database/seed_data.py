@@ -10,6 +10,7 @@ ROLES = [  # (name, level, mô tả)
     ("TEAM_LEADER", 40, "Trưởng nhóm"),
     ("EMPLOYEE", 20, "Nhân viên"),
     ("INTERN", 10, "Thực tập sinh"),
+    ("GUEST", 5, "Chỉ xem và tải file được cấp quyền"),
 ]
 
 PERMISSIONS = {
@@ -47,6 +48,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "TEAM_LEADER": _BASIC | {"employees.read", "files.upload", "tasks.manage"},
     "EMPLOYEE": _BASIC | {"files.upload"},
     "INTERN": set(_BASIC),
+    "GUEST": {"files.list", "files.read", "files.download"},
 }
 
 
