@@ -27,6 +27,7 @@ class AdminClient:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
+        self._enterprise_mode: bool | None = None
 
     # ------------------------------------------------------------------ #
     # HTTP helper
@@ -84,21 +85,28 @@ class AdminClient:
     # Auth
     # ------------------------------------------------------------------ #
     def login(self, username: str, password: str) -> dict:
-        result = self._request(
-            "POST",
-            "/api/ent/login",
-            json_body={"username": username, "password": password},
-        )
+        body = {"username": username, "password": password}
+        try:
+            result = self._request("POST", "/api/ent/login", json_body=body)
+        except AdminAPIError as exc:
+            if exc.status != 404:
+                raise
+            result = self._request("POST", "/api/auth/login", json_body=body)
+            self._enterprise_mode = False
+        else:
+            self._enterprise_mode = True
         self.token = result.get("token")
         return result
 
     def logout(self) -> None:
         if self.token:
-            self._request("POST", "/api/ent/logout")
+            path = "/api/ent/logout" if self._enterprise_mode else "/api/auth/logout"
+            self._request("POST", path)
         self.token = None
 
     def me(self) -> dict:
-        return self._request("GET", "/api/ent/me")
+        path = "/api/ent/me" if self._enterprise_mode else "/api/auth/me"
+        return self._request("GET", path)
 
     def health(self) -> dict:
         return self._request("GET", "/api/health")
@@ -168,13 +176,19 @@ class AdminClient:
     # Users / dashboard / packets / PXE
     # ------------------------------------------------------------------ #
     def list_users(self) -> list[dict]:
-        # Enterprise account directory; do not mix it with legacy TFTP accounts.
-        return self._request("GET", "/api/ent/users")["users"]
+        path = "/api/ent/users" if self._enterprise_mode else "/api/users"
+        return self._request("GET", path)["users"]
 
     def list_employees(self) -> list[dict]:
         return self._request("GET", "/api/ent/employees")["employees"]
 
     def create_user(self, username: str, password: str, role: str = "EMPLOYEE") -> dict:
+        if not self._enterprise_mode:
+            return self._request(
+                "POST",
+                "/api/users",
+                json_body={"username": username, "password": password, "role": role.lower()},
+            )
         return self._request(
             "POST", "/api/ent/users",
             json_body={"username": username, "password": password, "role": role.upper()},
@@ -184,6 +198,10 @@ class AdminClient:
         return self._request("DELETE", "/api/users", params={"username": username})
 
     def set_user_role(self, username: str, role: str) -> dict:
+        if not self._enterprise_mode:
+            return self._request(
+                "POST", "/api/users/role", json_body={"username": username, "role": role}
+            )["user"]
         return self._request(
             "POST", "/api/ent/users/role", json_body={"username": username, "role": role.upper()}
         )

@@ -163,6 +163,30 @@ class RegistryTests(unittest.TestCase):
 
 
 class ApiTests(unittest.TestCase):
+    def test_admin_client_creates_enterprise_user(self):
+        from admin_api import AdminAPIServer
+        from admin_client import AdminClient
+        from auth import AuthManager
+        from storage_manager import StorageManager
+
+        svc, tmp = make_service()
+        storage = StorageManager(Path(tmp) / "legacy")
+        storage.ensure_layout()
+        api = AdminAPIServer(storage, AuthManager(Path(tmp) / "legacy.db"),
+                             enterprise=svc, host="127.0.0.1", port=0)
+        api.start()
+        try:
+            client = AdminClient(api.url)
+            client.login("root", "RootPass123")
+            created = client.create_user("created-via-api", "Password123", "EMPLOYEE")
+            self.assertEqual(created["username"], "created-via-api")
+            self.assertIn(
+                "created-via-api",
+                {user["username"] for user in client.list_users()},
+            )
+        finally:
+            api.stop()
+
     def test_login_over_http_and_identity(self):
         from admin_api import AdminAPIServer
         from auth import AuthManager
