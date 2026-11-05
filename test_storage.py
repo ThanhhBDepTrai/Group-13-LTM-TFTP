@@ -233,7 +233,7 @@ def populate_boot_files(storage, names=("pxelinux.0", "bootia32.efi", "grubx64.e
 
 
 def test_pxe_defaults_and_validation_problems(tmp_path):
-    storage, pxe = make_pxe(tmp_path)
+    _storage, pxe = make_pxe(tmp_path)
     assert pxe.config.enabled is False
     problems = pxe.validate()
     assert any("does not exist" in p for p in problems)

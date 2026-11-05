@@ -417,7 +417,7 @@ def test_sha256_is_cached_until_file_changes(tmp_path):
 
 
 def test_pxe_boot_dir_is_read_only_over_tftp(tmp_path):
-    storage, db, _, pxe, hooks = build_stack(tmp_path, with_pxe=True)
+    storage, _db, _, pxe, hooks = build_stack(tmp_path, with_pxe=True)
     (pxe.boot_dir_path() / "pxelinux.0").write_bytes(b"ORIGINAL")
     (tmp_path / "evil").write_bytes(b"EVIL")
     with running_server(storage.root, hooks=hooks, allow_overwrite=True) as server:
@@ -439,7 +439,7 @@ def test_pxe_bare_filename_falls_back_to_boot_dir(tmp_path):
 
 
 def test_pxe_fallback_cannot_escape_boot_dir(tmp_path):
-    storage, _, _, pxe, hooks = build_stack(tmp_path, with_pxe=True)
+    storage, _, _, _pxe, hooks = build_stack(tmp_path, with_pxe=True)
     (storage.root / "private.txt").write_bytes(b"private")
     with running_server(storage.root, hooks=hooks, pxe_mode=True) as server:
         with pytest.raises(RemoteError) as exc:
@@ -448,7 +448,7 @@ def test_pxe_fallback_cannot_escape_boot_dir(tmp_path):
 
 
 def test_hook_failure_in_database_does_not_break_transfer(tmp_path):
-    storage, db, metrics, _, hooks = build_stack(tmp_path)
+    storage, db, _metrics, _, hooks = build_stack(tmp_path)
     db.close()  # DB hỏng: on_transfer sẽ ném lỗi, server chỉ log
     (storage.root / "f.bin").write_bytes(b"data")
     with running_server(storage.root, hooks=hooks) as server:

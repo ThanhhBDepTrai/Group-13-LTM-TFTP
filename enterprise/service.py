@@ -113,9 +113,8 @@ class EnterpriseService:
             self.permissions.require(user, perm)
             virtual = normalize(path)
             owner = self._owner(virtual)
-            if not self.acl.check(user, virtual, action, owner=owner):
-                if not (op == "WRQ" and owner is None and self._parent_writable(user, virtual)):
-                    raise EnterpriseError("Không có quyền với tệp/thư mục này", 403)
+            if not self.acl.check(user, virtual, action, owner=owner) and not (op == "WRQ" and owner is None and self._parent_writable(user, virtual)):
+                raise EnterpriseError("Không có quyền với tệp/thư mục này", 403)
             real = self.folders.real_path(virtual)
         except EnterpriseError as exc:
             self.audit.log(user["username"], f"tftp.{op.lower()}", path, exc.message, False)

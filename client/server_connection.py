@@ -28,7 +28,7 @@ class ServerConnection:
         except urllib.error.HTTPError as exc:
             try:
                 msg = json.loads(exc.read()).get("error", exc.reason)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 msg = str(exc.reason)
             raise EnterpriseError(msg, exc.code) from exc
         except (urllib.error.URLError, OSError) as exc:

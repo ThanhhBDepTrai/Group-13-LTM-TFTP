@@ -55,7 +55,7 @@ class JoinCodeManager:
                                 (digest,)).fetchone()
             return bool(row and not row["revoked"] and row["expires_at"] >= now
                         and row["uses"] < row["max_uses"])
-        except Exception:
+        except Exception:  # noqa: BLE001
             return False
 
     def revoke(self, code: str) -> None:

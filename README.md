@@ -12,6 +12,10 @@ Workspace riêng, tài khoản `SUPER_ADMIN` và các role doanh nghiệp.
 > truy cập được từ máy khác. Muốn dùng từ xa cần triển khai mạng/VPN và cấu hình
 > server phù hợp trước.
 
+
+> **Lưu ý bảo mật:** Không ghi mật khẩu, token, khóa API hay thông tin đăng nhập
+> vào README, commit hoặc issue. Các ví dụ bên dưới chỉ dùng giá trị mẫu `<...>`.
+
 ## 1. Tính năng
 
 - RFC 1350: RRQ, WRQ, DATA, ACK, ERROR; nhiều client, TID riêng, retry có giới hạn.
@@ -111,7 +115,7 @@ Firewall đơn thuần không khắc phục được giới hạn bind này.
 
 ```powershell
 # Chạy tại thư mục dự án. Đổi mật khẩu mặc định trước khi dùng.
-$env:TFTP_ADMIN_PASSWORD = "MatKhauManh123!"
+$env:TFTP_ADMIN_PASSWORD = "<MAT_KHAU_MANH>"
 python tftp_pro.py
 ```
 
@@ -126,11 +130,11 @@ Legacy TFTP mặc định lắng nghe TFTP trên mọi network interface, nhưng
 chỉ lắng nghe localhost. Đây là chế độ TFTP cũ, **không** phải cách bật truy cập
 LAN cho Workspace Enterprise.
 
-Chế độ này dùng hệ tài khoản legacy riêng trong `tftp_admin.db` (`admin/user/guest`),
+Chế độ này dùng hệ tài khoản legacy riêng trong `tftp_admin.db` (`tài khoản legacy (admin/user/guest)`),
 không dùng tài khoản Enterprise trong Workspace và không hỗ trợ ACL Guest của
 Workspace. Nếu database legacy chưa có tài khoản, chương trình tạo `admin` bằng
-giá trị `TFTP_ADMIN_PASSWORD`; nếu không đặt biến này, mật khẩu mặc định là
-`admin` và cần đổi ngay. File/database được lưu tương đối với thư mục chạy lệnh.
+giá trị `TFTP_ADMIN_PASSWORD`; không sử dụng mật khẩu mặc định; luôn đặt `TFTP_ADMIN_PASSWORD`
+trước khi chạy. File/database được lưu tương đối với thư mục chạy lệnh.
 
 Chạy dịch vụ legacy tách riêng (tùy chọn):
 
@@ -150,7 +154,7 @@ Ví dụ PowerShell cho tài khoản Enterprise trong Workspace:
 $login = Invoke-RestMethod -Method Post `
   -Uri http://127.0.0.1:6971/api/ent/login `
   -ContentType "application/json" `
-  -Body '{"username":"superadmin","password":"MatKhauWorkspace!"}'
+  -Body '{"username":"superadmin","password":"<MAT_KHAU_WORKSPACE>"}'
 
 $headers = @{ Authorization = "Bearer $($login.token)" }
 Invoke-RestMethod -Uri http://127.0.0.1:6971/api/ent/me -Headers $headers
@@ -162,7 +166,7 @@ Ví dụ tiếp theo dùng tài khoản legacy của `tftp_pro.py`:
 $login = Invoke-RestMethod -Method Post `
   -Uri http://127.0.0.1:6971/api/auth/login `
   -ContentType "application/json" `
-  -Body '{"username":"admin","password":"MatKhauManh123!"}'
+  -Body '{"username":"admin","password":"<MAT_KHAU_MANH>"}'
 
 $headers = @{ Authorization = "Bearer $($login.token)" }
 Invoke-RestMethod -Uri http://127.0.0.1:6971/api/dashboard -Headers $headers
@@ -173,7 +177,7 @@ Hoặc dùng curl:
 ```bash
 curl -s -X POST http://127.0.0.1:6971/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"MatKhauManh123!"}'
+  -d '{"username":"admin","password":"<MAT_KHAU_MANH>"}'
 ```
 
 Token có hiệu lực 8 giờ. Gọi `POST /api/auth/logout` để thu hồi token hiện tại.
