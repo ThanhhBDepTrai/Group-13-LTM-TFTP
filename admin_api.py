@@ -651,10 +651,9 @@ def main(argv=None) -> int:
     created = auth.ensure_default_admin()
     if created:
         logger.warning(
-            "Đã tạo tài khoản admin mặc định '%s' (mật khẩu: '%s'). "
-            "Hãy đổi mật khẩu trước khi dùng trong LAN.",
+            "Đã tạo tài khoản admin mặc định '%s'. Mật khẩu lấy từ "
+            "TFTP_ADMIN_PASSWORD; hãy đổi mật khẩu trước khi dùng trong LAN.",
             created[0],
-            created[1],
         )
     metrics = MetricsCollector(args.metrics_db or Path(args.db).with_suffix(".metrics.db"))
     tracer = PacketTracer()

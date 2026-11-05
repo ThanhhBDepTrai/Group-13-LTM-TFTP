@@ -111,10 +111,9 @@ def main(argv=None) -> int:
         created = auth.ensure_default_admin()
         if created:
             logger.warning(
-                "Đã tạo admin mặc định '%s' (mật khẩu '%s'). Hãy đổi mật khẩu "
-                "trước khi dùng trong LAN.",
+                "Đã tạo admin mặc định '%s'. Mật khẩu lấy từ TFTP_ADMIN_PASSWORD; "
+                "hãy đổi mật khẩu trước khi dùng trong LAN.",
                 created[0],
-                created[1],
             )
         api = AdminAPIServer(
             server.storage,

@@ -372,16 +372,21 @@ class AuthManager:
     def ensure_default_admin(self, password: str | None = None) -> tuple[str, str] | None:
         """Tạo admin đầu tiên nếu database chưa có user nào.
 
-        Mật khẩu lấy từ tham số, biến môi trường ``TFTP_ADMIN_PASSWORD`` hoặc
-        mặc định ``admin``. Trả về ``(username, password)`` khi vừa tạo, ngược
-        lại trả ``None``. Caller nên cảnh báo người dùng đổi mật khẩu.
+        Mật khẩu lấy từ tham số hoặc biến môi trường ``TFTP_ADMIN_PASSWORD``.
+        Không có mật khẩu mặc định; nếu thiếu cả hai sẽ báo lỗi. Trả về
+        ``(username, password)`` khi vừa tạo, ngược lại trả ``None``. Caller
+        nên cảnh báo người dùng đổi mật khẩu.
         """
         with self._connect() as connection:
             count = connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         if count:
             return None
         username = "admin"
-        secret = password or os.environ.get("TFTP_ADMIN_PASSWORD", "admin")
+        secret = password or os.environ.get("TFTP_ADMIN_PASSWORD")
+        if not secret:
+            raise ValueError(
+                "TFTP_ADMIN_PASSWORD is required to create the initial admin account"
+            )
         self.create_user(username, secret, "admin")
         return username, secret
 

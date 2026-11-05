@@ -19,11 +19,11 @@ Enterprise File Manager - Hướng dẫn chạy
    # không bắt buộc thư viện ngoài để chạy GUI cơ bản
 
 5) Chạy Server (TFTP + Admin API) - cửa sổ 1:
-   set TFTP_ADMIN_PASSWORD=MatKhauManh123!
+   set TFTP_ADMIN_PASSWORD=<MAT_KHAU_MANH>
    python tftp_pro.py
 
    (Linux/macOS)
-   export TFTP_ADMIN_PASSWORD=MatKhauManh123!
+   export TFTP_ADMIN_PASSWORD=<MAT_KHAU_MANH>
    python tftp_pro.py
 
 6) Chạy GUI - cửa sổ 2:

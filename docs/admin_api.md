@@ -20,7 +20,7 @@ trình ghi cảnh báo.
 Cách khuyến nghị (TFTP + API chung tiến trình, chung metrics/trace):
 
 ```powershell
-$env:TFTP_ADMIN_PASSWORD = "MatKhauManh123!"
+$env:TFTP_ADMIN_PASSWORD = "<MAT_KHAU_MANH>"
 python tftp_pro.py
 ```
 
@@ -43,8 +43,8 @@ Tùy chọn:
 | `--log-level` | `INFO` | Mức log |
 
 Lần chạy đầu, nếu database chưa có user, `admin` được tạo với mật khẩu từ
-`TFTP_ADMIN_PASSWORD` hoặc fallback `admin`. Log cảnh báo khi dùng fallback.
-Đổi mật khẩu ngay sau lần đăng nhập đầu.
+`TFTP_ADMIN_PASSWORD`. Không có mật khẩu mặc định; nếu thiếu biến này chương
+trình báo lỗi. Đổi mật khẩu ngay sau lần đăng nhập đầu.
 
 ## 2. Đăng nhập và token
 
@@ -52,7 +52,7 @@ Lần chạy đầu, nếu database chưa có user, `admin` được tạo với
 POST /api/auth/login
 Content-Type: application/json
 
-{"username": "admin", "password": "MatKhauManh123!"}
+{"username": "admin", "password": "<MAT_KHAU_MANH>"}
 ```
 
 Phản hồi:
