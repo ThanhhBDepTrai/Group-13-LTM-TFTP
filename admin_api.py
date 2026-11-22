@@ -1,9 +1,9 @@
-"""REST Admin API tách biệt hoàn toàn khỏi giao thức TFTP.
+﻿"""REST Admin API tÃ¡ch biá»‡t hoÃ n toÃ n khá»i giao thá»©c TFTP.
 
-Mặc định bind ``127.0.0.1:6971``. Mọi endpoint quản trị (trừ health/login) cần
-``Authorization: Bearer <token>``. API không bao giờ ghi token/mật khẩu vào log.
+Máº·c Ä‘á»‹nh bind ``127.0.0.1:6971``. Má»i endpoint quáº£n trá»‹ (trá»« health/login) cáº§n
+``Authorization: Bearer <token>``. API khÃ´ng bao giá» ghi token/máº­t kháº©u vÃ o log.
 
-Chạy độc lập:
+Cháº¡y Ä‘á»™c láº­p:
     python admin_api.py --root server_storage --db tftp_admin.db
 """
 
@@ -23,6 +23,7 @@ from auth import AuthError, AuthManager
 from enterprise import api_routes as enterprise_routes
 from enterprise.errors import EnterpriseError
 from metrics import MetricsCollector
+from network_simulator import NetworkFaultInjector
 from packet_trace import PacketTracer
 from pxe_config import PxeError, PxeManager
 from storage_manager import StorageError, StorageManager
@@ -36,6 +37,7 @@ from tftp_config import (
     VERSION,
 )
 from tftp_packet import TFTPError
+from transfer_ticket import TransferTicketManager
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +63,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     # ------------------------------------------------------------------ #
-    # Hạ tầng HTTP
+    # Háº¡ táº§ng HTTP
     # ------------------------------------------------------------------ #
     def log_message(self, fmt, *args):
         logger.info("%s - %s", self.address_string(), fmt % args)
@@ -104,13 +106,13 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         app = self.server.app
         length_header = self.headers.get("Content-Length")
         if length_header is None:
-            raise AdminAPIError("Thiếu Content-Length", 411)
+            raise AdminAPIError("Thiáº¿u Content-Length", 411)
         try:
             length = int(length_header)
         except ValueError as exc:
-            raise AdminAPIError("Content-Length không hợp lệ", 400) from exc
+            raise AdminAPIError("Content-Length khÃ´ng há»£p lá»‡", 400) from exc
         if length < 0 or length > app.max_body:
-            raise AdminAPIError("Body quá lớn", 413)
+            raise AdminAPIError("Body quÃ¡ lá»›n", 413)
         return self.rfile.read(length) if length else b""
 
     def _json_body(self) -> dict:
@@ -120,9 +122,9 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         try:
             data = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise AdminAPIError("JSON không hợp lệ", 400) from exc
+            raise AdminAPIError("JSON khÃ´ng há»£p lá»‡", 400) from exc
         if not isinstance(data, dict):
-            raise AdminAPIError("JSON phải là object", 400)
+            raise AdminAPIError("JSON pháº£i lÃ  object", 400)
         return data
 
     @staticmethod
@@ -138,7 +140,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
     def _authenticate(self, permission: str | None = None) -> tuple[dict, str]:
         header = self.headers.get("Authorization", "")
         if not header.startswith("Bearer "):
-            raise AuthError("Thiếu hoặc sai Authorization header", 401)
+            raise AuthError("Thiáº¿u hoáº·c sai Authorization header", 401)
         token = header[len("Bearer ") :].strip()
         app = self.server.app
         try:
@@ -239,7 +241,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("Admin API error")
             try:
-                self._send_json(500, {"error": "Lỗi máy chủ nội bộ"})
+                self._send_json(500, {"error": "Lá»—i mÃ¡y chá»§ ná»™i bá»™"})
             except OSError:
                 pass
 
@@ -293,7 +295,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
             enterprise_user = self._enterprise_principal(token)
             relative = self._first(query, "path", "")
             if not self._guest_can_read_tree(enterprise_user, relative):
-                raise EnterpriseError("Không có quyền xem thư mục này", 403)
+                raise EnterpriseError("KhÃ´ng cÃ³ quyá»n xem thÆ° má»¥c nÃ y", 403)
             entries = app.storage.list_dir(relative)
             if enterprise_user is not None and enterprise_user.get("role") == "GUEST":
                 entries = [
@@ -480,7 +482,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
             new_password = str(body.get("new_password", ""))
             if caller["role"] != "admin":
                 if target != caller["username"]:
-                    raise AuthError("Chỉ được đổi mật khẩu của chính mình", 403)
+                    raise AuthError("Chá»‰ Ä‘Æ°á»£c Ä‘á»•i máº­t kháº©u cá»§a chÃ­nh mÃ¬nh", 403)
                 app.auth.authenticate(
                     caller["username"], str(body.get("current_password", ""))
                 )
@@ -543,7 +545,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/pxe/profiles" and method in ("POST", "PUT"):
             self._authenticate("pxe.manage")
             if app.pxe is None:
-                raise AdminAPIError("PXE manager chưa được cấu hình", 501)
+                raise AdminAPIError("PXE manager chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh", 501)
             body = self._json_body()
             require_files = self._first(query, "require_files", "0") in (
                 "1",
@@ -557,7 +559,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/pxe/profiles" and method == "DELETE":
             self._authenticate("pxe.manage")
             if app.pxe is None:
-                raise AdminAPIError("PXE manager chưa được cấu hình", 501)
+                raise AdminAPIError("PXE manager chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh", 501)
             app.pxe.delete_profile(self._first(query, "name"))
             self._send_json(200, {"status": "deleted"})
             return
@@ -565,7 +567,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/pxe/select" and method == "GET":
             self._authenticate("pxe.read")
             if app.pxe is None:
-                raise AdminAPIError("PXE manager chưa được cấu hình", 501)
+                raise AdminAPIError("PXE manager chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh", 501)
             profile = app.pxe.select_profile(
                 self._first(query, "arch", "bios"),
                 name=self._first(query, "name") or None,
@@ -573,7 +575,92 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"profile": profile})
             return
 
-        raise AdminAPIError("Không tìm thấy endpoint", 404)
+        # ---------------- TV2: /api/v1/* ----------------
+        if path == "/api/v1/transfers/authorize" and method == "POST":
+            user, token = self._authenticate()
+            body = self._json_body()
+            filename = body.get("filename", body.get("path", body.get("file", "")))
+            mode_raw = body.get("mode", body.get("op", body.get("direction", "read")))
+            mode = str(mode_raw).strip().lower()
+            if mode in ("rrq", "download"):
+                mode = "read"
+            if mode in ("wrq", "upload"):
+                mode = "write"
+            if mode not in ("read", "write"):
+                raise AdminAPIError("mode phai la read hoac write", 400)
+            if app.enterprise is not None:
+                eu = self._enterprise_principal(token)
+                if eu is not None:
+                    perm = "files.download" if mode == "read" else "files.upload"
+                    self.enterprise.permissions.require(eu, perm)
+                    user = eu
+            else:
+                perm = "files.download" if mode == "read" else "files.upload"
+                app.auth.require(user, perm)
+            client_ip = str(self.client_address[0])
+            ticket = app.transfer_tickets.issue(client_ip, str(filename), mode)
+            self._send_json(200, {"status": "authorized", "expires_at": ticket["expires_at"]})
+            return
+
+        if path == "/api/v1/simulator/config" and method == "POST":
+            user, token = self._authenticate()
+            role = str(user.get("role", "")).lower()
+            enterprise_user = self._enterprise_principal(token)
+            if enterprise_user is not None:
+                role = str(enterprise_user.get("role", "")).lower()
+                if role not in ("admin", "super_admin"):
+                    raise EnterpriseError("Khong co quyen", 403)
+            else:
+                if role != "admin":
+                    raise AuthError("Khong co quyen", 403)
+            body = self._json_body()
+            loss_rate = body.get("loss_rate", 0.0)
+            delay_ms = body.get("delay_ms", 0)
+            app.fault_injector.update(loss_rate=loss_rate, delay_ms=delay_ms)
+            self._send_json(
+                200,
+                {
+                    "status": "updated",
+                    "loss_rate": app.fault_injector.loss_rate,
+                    "delay_ms": app.fault_injector.delay_ms,
+                },
+            )
+            return
+
+        if path.startswith("/api/v1/files/") and path.endswith("/versions") and method == "GET":
+            _caller, token = self._authenticate("files.read")
+            name = path[len("/api/v1/files/") : -len("/versions")]
+            from urllib.parse import unquote
+
+            name = unquote(name)
+            versions = app.storage.list_versions(name)
+            self._send_json(200, {"versions": versions})
+            return
+
+        if path.startswith("/api/v1/files/") and path.endswith("/restore") and method == "POST":
+            self._authenticate("files.upload")
+            name = path[len("/api/v1/files/") : -len("/restore")]
+            from urllib.parse import unquote
+
+            name = unquote(name)
+            body = self._json_body()
+            version = body.get("version", body.get("name", body.get("file", "")))
+            entry = app.storage.restore_version(name, str(version))
+            payload = entry.to_dict() if hasattr(entry, "to_dict") else entry
+            self._send_json(200, {"entry": payload})
+            return
+
+        if path.startswith("/api/v1/departments/") and path.endswith("/quota") and method == "GET":
+            _caller, token = self._authenticate()
+            dep_id = path[len("/api/v1/departments/") : -len("/quota")].strip("/")
+            if app.enterprise is not None:
+                result = app.enterprise.department_quota(dep_id)
+            else:
+                result = {"used_bytes": 0, "limit_bytes": 104857600, "percent": 0.0}
+            self._send_json(200, result)
+            return
+
+        raise AdminAPIError("KhA'ng tA�m th���y endpoint", 404)
 
 
 class AdminAPIServer:
@@ -589,6 +676,9 @@ class AdminAPIServer:
         host: str = DEFAULT_ADMIN_HOST,
         port: int = DEFAULT_ADMIN_PORT,
         max_body: int = DEFAULT_MAX_ADMIN_BODY,
+        transfer_tickets=None,
+        ticket_manager=None,
+        fault_injector=None,
     ):
         self.storage = storage
         self.auth = auth
@@ -597,6 +687,9 @@ class AdminAPIServer:
         self.pxe = pxe
         self.enterprise = enterprise
         self.max_body = max_body
+        self.transfer_tickets = transfer_tickets or ticket_manager or TransferTicketManager()
+        self.ticket_manager = self.transfer_tickets
+        self.fault_injector = fault_injector or NetworkFaultInjector()
         self.httpd = _AdminHTTPServer((host, port), _AdminRequestHandler, self)
         self.host, self.port = self.httpd.server_address[:2]
         self._thread: threading.Thread | None = None
@@ -636,7 +729,7 @@ def main(argv=None) -> int:
     parser.add_argument("--metrics-db", default=None)
     parser.add_argument("--pxe-profiles", default=DEFAULT_PXE_PROFILES)
     parser.add_argument("--enterprise-db", default=None,
-                        help="Bật Enterprise File Manager với database này")
+                        help="Báº­t Enterprise File Manager vá»›i database nÃ y")
     parser.add_argument("--enterprise-root", default="storage/company_files")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
@@ -651,8 +744,8 @@ def main(argv=None) -> int:
     created = auth.ensure_default_admin()
     if created:
         logger.warning(
-            "Đã tạo tài khoản admin mặc định '%s'. Mật khẩu lấy từ "
-            "TFTP_ADMIN_PASSWORD; hãy đổi mật khẩu trước khi dùng trong LAN.",
+            "ÄÃ£ táº¡o tÃ i khoáº£n admin máº·c Ä‘á»‹nh '%s'. Máº­t kháº©u láº¥y tá»« "
+            "TFTP_ADMIN_PASSWORD; hÃ£y Ä‘á»•i máº­t kháº©u trÆ°á»›c khi dÃ¹ng trong LAN.",
             created[0],
         )
     metrics = MetricsCollector(args.metrics_db or Path(args.db).with_suffix(".metrics.db"))

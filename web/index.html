@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TFTP Pro – Web Console</title>
+  <style>
+    :root { --bg:#F3F6FB; --card:#FFFFFF; --accent:#2563EB; --text:#243247; --muted:#718096; --danger:#C2413A; --border:#DCE3ED; --navy:#172B4D; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:16px 24px; background:var(--navy); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; color:#fff; }
+    header h1 { color:#fff; }
+    header h1 { margin:0; font-size:20px; }
+    .container { max-width:1200px; margin:24px auto; padding:0 16px; }
+    .card { background:var(--card); border-radius:12px; padding:16px; margin-bottom:16px; box-shadow:0 4px 12px rgba(0,0,0,.08); border:1px solid var(--border); }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    input, button, select, textarea { padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:#fff; color:var(--text); }
+    button { background:var(--accent); color:#fff; border:none; cursor:pointer; font-weight:600; }
+    button.secondary { background:#E8EEF7; color:var(--navy); }
+    button.danger { background:var(--danger); color:#fff; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:8px; border-bottom:1px solid var(--border); text-align:left; font-size:13px; vertical-align:top; }
+    .muted { color:var(--muted); font-size:13px; }
+    .hidden { display:none; }
+    .login { max-width:400px; margin:80px auto; }
+    .status { padding:8px 12px; border-radius:8px; background:#EAF0F7; color:var(--navy); }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+    nav button { margin-right:6px; }
+    pre { background:#F3F6FB; padding:12px; border-radius:8px; overflow:auto; max-height:300px; border:1px solid var(--border); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TFTP Pro – Web Console (Full)</h1>
+    <div id="userBadge" class="muted">Chưa đăng nhập</div>
+  </header>
+
+  <div id="loginView" class="container login">
+    <div class="card">
+      <h2>Đăng nhập</h2>
+      <div class="row"><input id="username" placeholder="Tên đăng nhập" value="admin" /></div>
+      <div class="row" style="margin-top:8px;"><input id="password" type="password" placeholder="Mật khẩu" /></div>
+      <div class="row" style="margin-top:12px;"><button onclick="login()">Đăng nhập</button></div>
+      <p id="loginError" class="muted"></p>
+    </div>
+  </div>
+
+  <div id="appView" class="container hidden">
+    <div class="card">
+      <nav class="row">
+        <button onclick="showTab('dashboard')">Dashboard</button>
+        <button class="secondary" onclick="showTab('files')">Files</button>
+        <button class="secondary" onclick="showTab('packets')">Packets</button>
+        <button class="secondary" onclick="showTab('users')">Users</button>
+        <button class="secondary" onclick="showTab('pxe')">PXE</button>
+        <button class="secondary" onclick="showTab('sim')">Simulator</button>
+        <button class="secondary" onclick="showTab('versions')">Versions/Quota</button>
+        <button class="secondary" onclick="showTab('tickets')">Tickets</button>
+        <button class="danger" onclick="logout()">Đăng xuất</button>
+      </nav>
+    </div>
+
+    <div id="tab-dashboard" class="card">
+      <h2>Dashboard & Metrics</h2>
+      <div class="grid">
+        <div class="status" id="statTotal">Total transfers: -</div>
+        <div class="status" id="statBytes">Bytes download: -</div>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <button class="secondary" onclick="loadDashboard()">Refresh</button>
+      </div>
+      <pre id="dashRaw" class="muted"></pre>
+    </div>
+
+    <div id="tab-files" class="card hidden">
+      <h2>File Manager</h2>
+      <div class="row">
+        <input id="uploadPath" placeholder="đường/dẫn/file.txt" />
+        <input id="uploadFile" type="file" />
+        <button onclick="uploadFile()">Upload</button>
+        <button class="secondary" onclick="loadFiles()">Refresh</button>
+      </div>
+      <table style="margin-top:12px;">
+        <thead><tr><th>Tên</th><th>Kích thước</th><th>Hành động</th></tr></thead>
+        <tbody id="fileTable"></tbody>
+      </table>
+    </div>
+
+    <div id="tab-packets" class="card hidden">
+      <h2>Packet Analyzer</h2>
+      <div class="row">
+        <button class="secondary" onclick="loadPackets()">Refresh</button>
+      </div>
+      <table style="margin-top:12px;">
+        <thead><tr><th>Time</th><th>Opcode</th><th>Source</th><th>Dest</th><th>Dir</th></tr></thead>
+        <tbody id="packetTable"></tbody>
+      </table>
+    </div>
+
+    <div id="tab-users" class="card hidden">
+      <h2>Users (RBAC)</h2>
+      <div class="row">
+        <input id="newUser" placeholder="username" />
+        <input id="newPass" placeholder="password" />
+        <select id="newRole">
+          <option value="user">user</option>
+          <option value="admin">admin</option>
+          <option value="guest">guest</option>
+        </select>
+        <button onclick="createUser()">Tạo</button>
+        <button class="secondary" onclick="loadUsers()">Refresh</button>
+      </div>
+      <table style="margin-top:12px;">
+        <thead><tr><th>Username</th><th>Role</th><th>Active</th></tr></thead>
+        <tbody id="userTable"></tbody>
+      </table>
+    </div>
+
+    <div id="tab-pxe" class="card hidden">
+      <h2>PXE Profiles</h2>
+      <div class="row"><button class="secondary" onclick="loadPxe()">Refresh</button></div>
+      <pre id="pxeRaw" class="muted"></pre>
+    </div>
+
+    <div id="tab-sim" class="card hidden">
+      <h2>Network Simulator</h2>
+      <div class="row">
+        <label>Loss rate: <input id="lossRate" type="number" step="0.01" min="0" max="0.5" value="0" style="width:90px" /></label>
+        <label>Delay ms: <input id="delayMs" type="number" min="0" max="500" value="0" style="width:90px" /></label>
+        <button onclick="applySim()">Áp dụng</button>
+      </div>
+      <p id="simStatus" class="muted"></p>
+    </div>
+
+    <div id="tab-versions" class="card hidden">
+      <h2>Versions & Quota</h2>
+      <div class="row">
+        <input id="verFile" placeholder="file.txt" />
+        <button class="secondary" onclick="loadVersions()">Xem versions</button>
+      </div>
+      <div id="verList" class="muted" style="margin-top:8px;"></div>
+      <div class="row" style="margin-top:12px;">
+        <input id="restoreVer" placeholder="tên file .bak" />
+        <button onclick="restoreVersion()">Khôi phục</button>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <input id="deptId" placeholder="department id" />
+        <button class="secondary" onclick="loadQuota()">Xem quota</button>
+      </div>
+      <p id="quotaStatus" class="muted"></p>
+    </div>
+
+    <div id="tab-tickets" class="card hidden">
+      <h2>Transfer Ticket</h2>
+      <div class="row">
+        <input id="ticketFile" placeholder="file.txt" />
+        <select id="ticketMode"><option value="read">read</option><option value="write">write</option></select>
+        <button onclick="authorizeTicket()">Xin vé</button>
+      </div>
+      <p id="ticketStatus" class="muted"></p>
+    </div>
+  </div>
+
+  <script>
+    let token = null;
+    const api = (path, opts={}) => fetch(path, {
+      ...opts,
+      headers: { ...(opts.headers||{}), ...(token?{Authorization:'Bearer '+token}:{}) }
+    });
+
+    async function login() {
+      const u = document.getElementById('username').value;
+      const p = document.getElementById('password').value;
+      const res = await fetch('/api/auth/login', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({username:u, password:p})
+      });
+      if (!res.ok) { document.getElementById('loginError').textContent='Đăng nhập thất bại'; return; }
+      const data = await res.json();
+      token = data.token;
+      document.getElementById('userBadge').textContent = data.username + ' (' + data.role + ')';
+      document.getElementById('loginView').classList.add('hidden');
+      document.getElementById('appView').classList.remove('hidden');
+      loadDashboard();
+    }
+
+    function logout() { token=null; location.reload(); }
+
+    function showTab(id) {
+      document.querySelectorAll('[id^="tab-"]').forEach(e=>e.classList.add('hidden'));
+      document.getElementById('tab-'+id).classList.remove('hidden');
+    }
+
+    async function loadDashboard() {
+      const res = await api('/api/dashboard');
+      const data = await res.json();
+      document.getElementById('statTotal').textContent = 'Total transfers: ' + (data.stats?.total_transfers ?? 0);
+      document.getElementById('statBytes').textContent = 'Bytes download: ' + (data.stats?.bytes_download ?? 0);
+      document.getElementById('dashRaw').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function loadFiles() {
+      const res = await api('/api/files');
+      const data = await res.json();
+      const tbody = document.getElementById('fileTable');
+      tbody.innerHTML = '';
+      for (const e of (data.entries||[])) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${e.name}</td><td>${e.size}</td>
+          <td><button class="secondary" onclick="downloadFile('${e.relative_path}')">Download</button>
+          <button class="secondary" onclick="deleteFile('${e.relative_path}')">Delete</button></td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function downloadFile(path) {
+      const res = await api('/api/files/download?path='+encodeURIComponent(path));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download=path.split('/').pop(); a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function deleteFile(path) {
+      await api('/api/files?path='+encodeURIComponent(path), {method:'DELETE'});
+      loadFiles();
+    }
+
+    async function uploadFile() {
+      const path = document.getElementById('uploadPath').value;
+      const file = document.getElementById('uploadFile').files[0];
+      if (!path || !file) return alert('Thiếu path/file');
+      const buf = await file.arrayBuffer();
+      await api('/api/files/upload?path='+encodeURIComponent(path), {method:'POST', body:buf});
+      loadFiles();
+    }
+
+    async function loadPackets() {
+      const res = await api('/api/packets?limit=100');
+      const data = await res.json();
+      const tbody = document.getElementById('packetTable');
+      tbody.innerHTML = '';
+      for (const e of (data.events||[])) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${e.timestamp||''}</td><td>${e.opcode||''}</td><td>${e.source||''}</td><td>${e.destination||''}</td><td>${e.direction||''}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function loadUsers() {
+      const res = await api('/api/users');
+      const data = await res.json();
+      const tbody = document.getElementById('userTable');
+      tbody.innerHTML = '';
+      for (const u of (data.users||[])) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${u.username}</td><td>${u.role}</td><td>${u.active}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function createUser() {
+      const username = document.getElementById('newUser').value;
+      const password = document.getElementById('newPass').value;
+      const role = document.getElementById('newRole').value;
+      await api('/api/users', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({username, password, role})});
+      loadUsers();
+    }
+
+    async function loadPxe() {
+      const res = await api('/api/pxe/profiles');
+      const data = await res.json();
+      document.getElementById('pxeRaw').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function applySim() {
+      const loss_rate = parseFloat(document.getElementById('lossRate').value);
+      const delay_ms = parseInt(document.getElementById('delayMs').value, 10);
+      const res = await api('/api/v1/simulator/config', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({loss_rate, delay_ms})});
+      const data = await res.json();
+      document.getElementById('simStatus').textContent = JSON.stringify(data);
+    }
+
+    async function loadVersions() {
+      const file = document.getElementById('verFile').value;
+      const res = await api('/api/v1/files/'+encodeURIComponent(file)+'/versions');
+      const data = await res.json();
+      const div = document.getElementById('verList');
+      div.innerHTML = '';
+      (data.versions||[]).forEach(v => {
+        const p = document.createElement('p');
+        p.textContent = v.name + ' | ' + v.size + ' bytes | ' + v.timestamp;
+        div.appendChild(p);
+      });
+    }
+
+    async function restoreVersion() {
+      const file = document.getElementById('verFile').value;
+      const version = document.getElementById('restoreVer').value;
+      const res = await api('/api/v1/files/'+encodeURIComponent(file)+'/restore', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({version})});
+      const data = await res.json();
+      alert('Restored: ' + JSON.stringify(data.entry||data));
+    }
+
+    async function loadQuota() {
+      const id = document.getElementById('deptId').value;
+      const res = await api('/api/v1/departments/'+encodeURIComponent(id)+'/quota');
+      const data = await res.json();
+      document.getElementById('quotaStatus').textContent = JSON.stringify(data);
+    }
+
+    async function authorizeTicket() {
+      const filename = document.getElementById('ticketFile').value;
+      const mode = document.getElementById('ticketMode').value;
+      const res = await api('/api/v1/transfers/authorize', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({filename, mode})});
+      const data = await res.json();
+      document.getElementById('ticketStatus').textContent = JSON.stringify(data);
+    }
+  </script>
+</body>
+</html>

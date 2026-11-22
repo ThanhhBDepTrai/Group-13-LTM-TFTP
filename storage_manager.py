@@ -127,7 +127,8 @@ class StorageManager:
 
     @staticmethod
     def _is_internal(name: str) -> bool:
-        return name.startswith(".") and name.endswith(".part") or name.startswith(".tftp")
+        # Ẩn mọi file/thư mục ẩn (bao gồm .versions, .part, .tftp*).
+        return str(name).startswith(".")
 
     # ------------------------------------------------------------------ #
     # Đọc / ghi
@@ -163,6 +164,11 @@ class StorageManager:
         if path.is_dir():
             raise StorageError("Đường dẫn là thư mục", 409)
         path.parent.mkdir(parents=True, exist_ok=True)
+
+        # File Versioning: nếu file đã tồn tại, chuyển bản cũ vào .versions/ trước khi ghi.
+        if path.exists() and path.is_file() and overwrite:
+            self._backup_existing_version(path)
+
         temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         try:
             with open(temp_path, "wb") as file:
@@ -178,6 +184,85 @@ class StorageManager:
             except OSError:
                 pass
         return self.metadata(relative, include_hash=True)
+
+    def _backup_existing_version(self, path: Path) -> None:
+        version_dir = path.parent / ".versions"
+        version_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        backup = version_dir / f"{path.name}.{stamp}.bak"
+        counter = 0
+        while backup.exists():
+            counter += 1
+            backup = version_dir / f"{path.name}.{stamp}.{counter}.bak"
+        try:
+            os.replace(path, backup)
+        except OSError:
+            # fallback: copy then unlink
+            shutil.copy2(path, backup)
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+    def list_versions(self, relative: str) -> list[dict]:
+        path = self.resolve(relative)
+        version_dir = path.parent / ".versions"
+        versions: list[dict] = []
+        if version_dir.is_dir():
+            for backup in sorted(version_dir.glob(f"{path.name}.*.bak"), reverse=True):
+                if not backup.is_file():
+                    continue
+                try:
+                    rel = self.relative_path(backup)
+                    sha = self.sha256(rel)
+                except Exception:  # noqa: BLE001
+                    sha = None
+                stat = backup.stat()
+                versions.append(
+                    {
+                        "name": backup.name,
+                        "path": backup.name,
+                        "relative_path": rel if "rel" in locals() else str(backup),
+                        "timestamp": _iso_timestamp(stat.st_mtime),
+                        "size": stat.st_size,
+                        "sha256": sha,
+                    }
+                )
+        return versions
+
+    def get_versions(self, relative: str) -> list[dict]:
+        return self.list_versions(relative)
+
+    def versions(self, relative: str) -> list[dict]:
+        return self.list_versions(relative)
+
+    def restore_version(self, relative: str, version: str) -> FileMetadata:
+        path = self.resolve(relative)
+        version_dir = path.parent / ".versions"
+        backup = version_dir / str(version)
+        if not backup.is_file():
+            raise StorageError("Khong tim thay phien ban", 404)
+        if not backup.name.startswith(path.name + "."):
+            raise StorageError("Phien ban khong hop le", 400)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.restore")
+        try:
+            with open(temp_path, "wb") as file:
+                file.write(backup.read_bytes())
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temp_path, path)
+        except OSError as exc:
+            raise StorageError(f"Khong khoi phuc duoc: {exc}", 500) from exc
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        return self.metadata(relative, include_hash=True)
+
+    def restore(self, relative: str, version: str) -> FileMetadata:
+        return self.restore_version(relative, version)
 
     def open_read(self, relative: str):
         path = self.resolve(relative)

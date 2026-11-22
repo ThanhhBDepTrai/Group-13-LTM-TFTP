@@ -129,9 +129,63 @@ class EnterpriseService:
     def register_upload(self, user: dict, path: str) -> dict:
         """Gọi sau khi WRQ hoàn tất để lưu metadata (owner, sha256)."""
         virtual = normalize(path)
-        meta = self.files.register(virtual, self.folders.real_path(virtual), user["username"])
+        real = self.folders.real_path(virtual)
+        folder = self._folder_for_path(virtual)
+        if folder is not None and folder.get("department_id") is not None:
+            quota = self.department_quota(folder["department_id"])
+            old = self.files.get(virtual)
+            old_size = int(old["size"]) if old else 0
+            new_size = real.stat().st_size if real.is_file() else 0
+            if quota["used_bytes"] - old_size + new_size > quota["limit_bytes"]:
+                raise EnterpriseError("Vuot quota phong ban", 413)
+        meta = self.files.register(virtual, real, user["username"])
         self.audit.log(user["username"], "file.upload", virtual, meta["sha256"])
         return meta
+
+    def _folder_for_path(self, virtual: str) -> dict | None:
+        virtual = normalize(virtual)
+        parts = [p for p in virtual.strip("/").split("/") if p]
+        candidates: list[str] = []
+        cur = ""
+        for part in parts[:-1]:
+            cur += "/" + part
+            candidates.append(cur)
+        if not candidates:
+            candidates.append("/")
+        for candidate in reversed(candidates):
+            folder = self.folders.get(candidate)
+            if folder is not None:
+                return folder
+        return self.folders.get("/")
+
+    def department_quota(self, department_id) -> dict:
+        with self.db.connect() as c:
+            row = c.execute(
+                "SELECT * FROM departments WHERE id=?", (int(department_id),)
+            ).fetchone()
+            if row is None:
+                raise EnterpriseError("Khong tim thay phong ban", 404)
+            keys = row.keys()
+            quota = int(row["quota_bytes"]) if "quota_bytes" in keys and row["quota_bytes"] is not None else 104857600
+            folders = [
+                r["path"]
+                for r in c.execute(
+                    "SELECT path FROM folders WHERE department_id=?", (int(department_id),)
+                )
+            ]
+            used = 0
+            for f in c.execute("SELECT path, size FROM files"):
+                for folder in folders:
+                    base = folder.rstrip("/")
+                    if f["path"] == folder or f["path"].startswith(base + "/"):
+                        used += int(f["size"] or 0)
+                        break
+            percent = (used / quota * 100.0) if quota else 0.0
+            return {
+                "used_bytes": used,
+                "limit_bytes": quota,
+                "percent": round(percent, 2),
+            }
 
     def delete_file(self, user: dict, path: str) -> None:
         self.permissions.require(user, "files.delete")

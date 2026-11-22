@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS role_permissions (
     permission TEXT NOT NULL REFERENCES permissions(code) ON DELETE CASCADE,
     PRIMARY KEY (role, permission));
 CREATE TABLE IF NOT EXISTS departments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT);
+    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT,
+    quota_bytes INTEGER NOT NULL DEFAULT 104857600);
 CREATE TABLE IF NOT EXISTS positions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT);
 CREATE TABLE IF NOT EXISTS ent_users (
@@ -48,6 +49,10 @@ CREATE TABLE IF NOT EXISTS folders (
 CREATE TABLE IF NOT EXISTS files (
     id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE, owner TEXT,
     size INTEGER NOT NULL DEFAULT 0, sha256 TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS file_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, file_path TEXT NOT NULL, version_path TEXT NOT NULL,
+    timestamp TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0, sha256 TEXT,
+    author TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS file_tags (
@@ -97,6 +102,11 @@ class Database:
             conn.executescript(SCHEMA)
             if conn.execute("SELECT COUNT(*) FROM schema_info").fetchone()[0] == 0:
                 conn.execute("INSERT INTO schema_info(version) VALUES (?)", (SCHEMA_VERSION,))
+            # Migration an toàn cho DB cũ.
+            try:
+                conn.execute("ALTER TABLE departments ADD COLUMN quota_bytes INTEGER NOT NULL DEFAULT 104857600")
+            except sqlite3.OperationalError:
+                pass
 
     @contextmanager
     def connect(self):

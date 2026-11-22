@@ -9,7 +9,11 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
+import socket
 import sys
+import threading
+import time
 from pathlib import Path
 
 from admin_api import AdminAPIServer
@@ -143,6 +147,86 @@ def main(argv=None) -> int:
         if api is not None:
             api.stop()
     return 0
+
+
+_RUNNING: dict[str, threading.Thread] = {}
+
+
+def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.5)
+            sock.bind((host, port))
+        return False
+    except OSError:
+        return True
+
+
+def ensure_local_server_running(admin_password: str, root_dir: str):
+    """Kiểm tra cổng, tạo .env nếu thiếu và chạy Server nền (1-Click)."""
+    root = Path(root_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    env_path = root / ".env"
+    if not env_path.exists():
+        env_path.write_text(
+            f"TFTP_ADMIN_PASSWORD={admin_password}\n", encoding="utf-8"
+        )
+    os.environ.setdefault("TFTP_ADMIN_PASSWORD", str(admin_password))
+
+    # Nếu cả hai cổng đã bận thì coi như server đã chạy.
+    if _port_in_use(6969) and _port_in_use(6971):
+        return None
+
+    key = str(root.resolve())
+    if key in _RUNNING and _RUNNING[key].is_alive():
+        return _RUNNING[key]
+
+    from tftp_config import DEFAULT_ADMIN_DB
+
+    admin_db = root / DEFAULT_ADMIN_DB
+
+    def _run():
+        try:
+            config = ServerConfig(
+                host="0.0.0.0",
+                port=6969,
+                root=root,
+                log_level="ERROR",
+            )
+            metrics = MetricsCollector(
+                str(admin_db).replace(".db", ".metrics.db")
+            )
+            tracer = PacketTracer()
+            server = TFTPServer(config, metrics=metrics, tracer=tracer)
+            server.storage.ensure_layout()
+            pxe = PxeManager(server.storage, "pxe_profiles.json")
+            auth = AuthManager(str(admin_db))
+            auth.ensure_default_admin(password=str(admin_password))
+            api = AdminAPIServer(
+                server.storage,
+                auth,
+                metrics=metrics,
+                tracer=tracer,
+                pxe=pxe,
+                host="127.0.0.1",
+                port=6971,
+            )
+            api.start()
+            server.serve_forever()
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+    thread = threading.Thread(target=_run, name="tftp-pro-local", daemon=True)
+    thread.start()
+    _RUNNING[key] = thread
+
+    # Chờ cổng sẵn sàng (tối đa ~5s).
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        if _port_in_use(6969) or _port_in_use(6971):
+            break
+        time.sleep(0.1)
+    return thread
 
 
 if __name__ == "__main__":

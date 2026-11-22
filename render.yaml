@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: tftp-pro-nhom13
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: TFTP_ADMIN_PASSWORD
+        sync: false
+      - key: PORT
+        value: 10000

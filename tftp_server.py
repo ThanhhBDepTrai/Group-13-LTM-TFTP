@@ -92,6 +92,10 @@ class TFTPServer:
         *,
         metrics: MetricsCollector | None = None,
         tracer: PacketTracer | None = None,
+        auth_required: bool = False,
+        transfer_tickets=None,
+        ticket_manager=None,
+        fault_injector=None,
     ):
         self.config = config
         self.root = config.root.resolve()
@@ -103,6 +107,10 @@ class TFTPServer:
         self.storage = StorageManager(self.root)
         self.metrics = metrics
         self.tracer = tracer
+        self.auth_required = bool(auth_required)
+        self.transfer_tickets = transfer_tickets or ticket_manager
+        self.ticket_manager = self.transfer_tickets
+        self.fault_injector = fault_injector
         self._sem = threading.Semaphore(config.max_clients)
         self._stop = threading.Event()
         self.sock: socket.socket | None = None
@@ -162,6 +170,23 @@ class TFTPServer:
 
     # ---------- handlers ----------
     def handle_rrq(self, pkt, client_addr, data_sock) -> TransferOutcome:
+        if getattr(self, "auth_required", False):
+            mgr = getattr(self, "transfer_tickets", None) or getattr(self, "ticket_manager", None)
+            client_ip = client_addr[0] if isinstance(client_addr, (tuple, list)) else client_addr
+            allowed = False
+            if mgr is not None:
+                try:
+                    allowed = bool(mgr.consume(client_ip, pkt.filename, "read"))
+                except TypeError:
+                    try:
+                        allowed = bool(mgr.consume(client_ip, pkt.filename, "read", now=None))
+                    except Exception:  # noqa: BLE001
+                        allowed = False
+                except Exception:  # noqa: BLE001
+                    allowed = False
+            if not allowed:
+                self._send_error(data_sock, client_addr, 2, "Access violation: Unauthorized transfer")
+                return TransferOutcome(status="failed", error="Access violation: Unauthorized transfer")
         try:
             path = self.safe_path(pkt.filename)
         except TFTPError as e:
@@ -226,6 +251,11 @@ class TFTPServer:
                     retries = 0
                     while True:
                         for _index, block, chunk in window:
+                            injector = getattr(self, "fault_injector", None)
+                            if injector is not None and hasattr(injector, "should_drop") and injector.should_drop():
+                                continue
+                            if injector is not None and hasattr(injector, "apply_delay"):
+                                injector.apply_delay()
                             self._send_raw(
                                 data_sock, pack_data(block, chunk), client_addr
                             )
@@ -312,6 +342,18 @@ class TFTPServer:
         )
 
     def handle_wrq(self, pkt, client_addr, data_sock) -> TransferOutcome:
+        if getattr(self, "auth_required", False):
+            mgr = getattr(self, "transfer_tickets", None) or getattr(self, "ticket_manager", None)
+            client_ip = client_addr[0] if isinstance(client_addr, (tuple, list)) else client_addr
+            allowed = False
+            if mgr is not None:
+                try:
+                    allowed = bool(mgr.consume(client_ip, pkt.filename, "write"))
+                except Exception:  # noqa: BLE001
+                    allowed = False
+            if not allowed:
+                self._send_error(data_sock, client_addr, 2, "Access violation: Unauthorized transfer")
+                return TransferOutcome(status="failed", error="Access violation: Unauthorized transfer")
         try:
             path = self.safe_path(pkt.filename)
         except TFTPError as e:
