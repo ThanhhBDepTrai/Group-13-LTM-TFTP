@@ -3,6 +3,11 @@
 Đây là lớp thuần dữ liệu, không mở socket và không cần quyền bắt gói của hệ
 điều hành. Cùng một module được dùng bởi GUI, test và (nếu cần) CLI để bảo đảm
 Dashboard/Packet Analyzer nhìn thấy cùng một cách diễn giải sự kiện.
+
+Nhận diện gói gửi lại (retransmit): một gói DATA/ACK được coi là gửi lại khi
+đã từng xuất hiện gói cùng (opcode, source, destination, direction, block).
+Cờ này được gắn vào từng sự kiện dưới khóa ``is_retransmit`` để GUI tô nổi bật
+khi demo rớt gói.
 """
 
 from __future__ import annotations
@@ -22,7 +27,14 @@ PACKET_COLUMNS = (
     "direction",
 )
 
+# Giữ nguyên PACKET_COLUMNS để không phá GUI hiện tại; GUI mới có thể dùng
+# bộ cột mở rộng này để hiển thị thêm cột "Retransmit".
+PACKET_COLUMNS_WITH_RETRANSMIT = (*PACKET_COLUMNS, "is_retransmit")
+
 _OPCODE_ORDER = ("RRQ", "WRQ", "OACK", "DATA", "ACK", "ERROR")
+
+# Các opcode mang số hiệu khối nên có thể bị trùng khi gửi lại.
+_RETRANSMIT_OPCODES = ("DATA", "ACK")
 
 
 def _event_dict(event: Any) -> dict:
@@ -48,6 +60,41 @@ def _host_part(endpoint: Any) -> str:
     return text
 
 
+def mark_retransmissions(events: Iterable[Any], *, force: bool = False) -> list[dict]:
+    """Gắn cờ ``is_retransmit`` cho từng sự kiện và trả về danh sách dict mới.
+
+    Gói DATA/ACK trùng (opcode, source, destination, direction, block_number)
+    với một gói đã thấy trước đó là gói gửi lại. Sự kiện đã có sẵn khóa
+    ``is_retransmit`` được giữ nguyên (để một tập con đã lọc không bị tính
+    lại sai so với toàn bộ capture), trừ khi ``force=True``.
+    """
+    items = [_event_dict(event) for event in events]
+    seen: set[tuple[str, str, str, str, int]] = set()
+    for item in items:
+        opcode = _text(item.get("opcode")).upper()
+        flagged = False
+        if opcode in _RETRANSMIT_OPCODES:
+            try:
+                block = int(item.get("block_number"))
+            except (TypeError, ValueError):
+                block = None
+            if block is not None:
+                key = (
+                    opcode,
+                    _text(item.get("source")),
+                    _text(item.get("destination")),
+                    _text(item.get("direction")),
+                    block,
+                )
+                flagged = key in seen
+                seen.add(key)
+        if force or "is_retransmit" not in item:
+            item["is_retransmit"] = flagged
+        else:
+            item["is_retransmit"] = bool(item["is_retransmit"])
+    return items
+
+
 @dataclass(frozen=True)
 class PacketFilter:
     """Bộ lọc packet đơn giản, thân thiện với ô nhập trên GUI."""
@@ -57,6 +104,7 @@ class PacketFilter:
     source: str | None = None
     destination: str | None = None
     block_number: int | None = None
+    retransmit: bool | None = None  # True: chỉ gói gửi lại; False: loại bỏ chúng
 
     def normalized(self) -> PacketFilter:
         return PacketFilter(
@@ -65,6 +113,7 @@ class PacketFilter:
             source=_text(self.source).lower() or None,
             destination=_text(self.destination).lower() or None,
             block_number=self.block_number,
+            retransmit=self.retransmit,
         )
 
     def matches(self, event: Any) -> bool:
@@ -88,6 +137,9 @@ class PacketFilter:
                     return False
             except (TypeError, ValueError):
                 return False
+        if wanted.retransmit is not None:
+            if bool(item.get("is_retransmit")) != wanted.retransmit:
+                return False
         return True
 
 
@@ -97,45 +149,55 @@ def filter_packets(
 ) -> list[dict]:
     items = [_event_dict(event) for event in events]
     if packet_filter is not None:
+        if packet_filter.retransmit is not None:
+            # Cờ phải được tính trên toàn bộ capture trước khi lọc.
+            items = mark_retransmissions(items)
         items = [item for item in items if packet_filter.matches(item)]
     return items
 
 
 def summarize_packets(events: Iterable[Any]) -> dict:
-    """Trả về số liệu tổng hợp phục vụ Packet Analyzer/Dashboard."""
-    items = [_event_dict(event) for event in events]
+    """Trả về số liệu tổng hợp phục vụ Packet Analyzer/Dashboard.
+
+    Các khóa liên quan đến rớt gói / phát lại:
+    - ``data_retransmissions``: số gói DATA bị gửi lại (giữ tương thích cũ).
+    - ``ack_retransmissions``: số gói ACK bị lặp.
+    - ``retransmit_packets`` (= ``lost_or_retransmitted``): tổng gói phát lại.
+    - ``retransmit_bytes``: số byte payload DATA phải gửi lại.
+    - ``retransmit_rate``: % gói DATA bị gửi lại trên tổng gói DATA.
+    - ``retransmit_blocks``: danh sách (block, số lần gửi lại) để hiển thị.
+    """
+    items = mark_retransmissions(events)
     counts = Counter(_text(item.get("opcode")).upper() or "UNKNOWN" for item in items)
     directions = Counter(_text(item.get("direction")) or "unknown" for item in items)
     payload_bytes = 0
     data_bytes = 0
+    data_packets = 0
+    data_retransmissions = 0
+    ack_retransmissions = 0
+    retransmit_bytes = 0
+    retransmit_blocks: Counter = Counter()
+
     for item in items:
+        opcode = _text(item.get("opcode")).upper()
         try:
             length = max(int(item.get("payload_length") or 0), 0)
         except (TypeError, ValueError):
             length = 0
         payload_bytes += length
-        if _text(item.get("opcode")).upper() == "DATA":
+        if opcode == "DATA":
             data_bytes += length
-
-    seen_data_blocks: set[tuple[str, str, str, int]] = set()
-    retransmissions = 0
-    for item in items:
-        if _text(item.get("opcode")).upper() != "DATA":
-            continue
-        try:
-            block = int(item.get("block_number"))
-        except (TypeError, ValueError):
-            continue
-        key = (
-            _text(item.get("source")),
-            _text(item.get("destination")),
-            _text(item.get("direction")),
-            block,
-        )
-        if key in seen_data_blocks:
-            retransmissions += 1
-        else:
-            seen_data_blocks.add(key)
+            data_packets += 1
+        if item.get("is_retransmit"):
+            if opcode == "DATA":
+                data_retransmissions += 1
+                retransmit_bytes += length
+            elif opcode == "ACK":
+                ack_retransmissions += 1
+            try:
+                retransmit_blocks[int(item.get("block_number"))] += 1
+            except (TypeError, ValueError):
+                pass
 
     ordered_counts = {
         name: counts[name]
@@ -146,6 +208,7 @@ def summarize_packets(events: Iterable[Any]) -> dict:
         if name not in ordered_counts:
             ordered_counts[name] = counts[name]
 
+    retransmit_packets = data_retransmissions + ack_retransmissions
     timestamps = [item.get("timestamp") for item in items if item.get("timestamp")]
     return {
         "total": len(items),
@@ -153,7 +216,15 @@ def summarize_packets(events: Iterable[Any]) -> dict:
         "directions": dict(directions),
         "payload_bytes": payload_bytes,
         "data_bytes": data_bytes,
-        "data_retransmissions": retransmissions,
+        "data_retransmissions": data_retransmissions,
+        "ack_retransmissions": ack_retransmissions,
+        "retransmit_packets": retransmit_packets,
+        "lost_or_retransmitted": retransmit_packets,
+        "retransmit_bytes": retransmit_bytes,
+        "retransmit_rate": (
+            round(data_retransmissions * 100 / data_packets, 2) if data_packets else 0.0
+        ),
+        "retransmit_blocks": sorted(retransmit_blocks.items()),
         "first_timestamp": timestamps[0] if timestamps else None,
         "last_timestamp": timestamps[-1] if timestamps else None,
     }
@@ -166,7 +237,7 @@ def group_by_conversation(events: Iterable[Any]) -> list[dict]:
     nhất để người học đối chiếu RRQ → OACK → DATA → ACK với Wireshark.
     """
     groups: dict[tuple[str, ...], dict] = {}
-    for item in filter_packets(events):
+    for item in mark_retransmissions(events):
         endpoints = tuple(
             sorted(
                 {
@@ -182,12 +253,15 @@ def group_by_conversation(events: Iterable[Any]) -> list[dict]:
                 "endpoints": list(endpoints),
                 "packets": 0,
                 "payload_bytes": 0,
+                "retransmits": 0,
                 "opcodes": Counter(),
                 "first_timestamp": item.get("timestamp"),
                 "last_timestamp": item.get("timestamp"),
             },
         )
         group["packets"] += 1
+        if item.get("is_retransmit"):
+            group["retransmits"] += 1
         try:
             group["payload_bytes"] += max(int(item.get("payload_length") or 0), 0)
         except (TypeError, ValueError):
@@ -204,8 +278,11 @@ def group_by_conversation(events: Iterable[Any]) -> list[dict]:
 
 
 def format_table(events: Iterable[Any], *, limit: int = 200) -> str:
-    """Định dạng bảng text để dùng trong log, test hoặc CLI."""
-    items = filter_packets(events)[: max(1, limit)]
+    """Định dạng bảng text để dùng trong log, test hoặc CLI.
+
+    Gói gửi lại được đánh dấu ``RETX`` ở cuối dòng.
+    """
+    items = mark_retransmissions(events)[: max(1, limit)]
     if not items:
         return "Không có packet."
     header = (
@@ -215,7 +292,7 @@ def format_table(events: Iterable[Any], *, limit: int = 200) -> str:
     lines = [header, "-" * len(header)]
     for item in items:
         block = item.get("block_number")
-        lines.append(
+        line = (
             f"{_text(item.get('timestamp')):<16} "
             f"{_text(item.get('source')):<22} "
             f"{_text(item.get('destination')):<22} "
@@ -224,6 +301,9 @@ def format_table(events: Iterable[Any], *, limit: int = 200) -> str:
             f"{int(item.get('payload_length') or 0):>7} "
             f"{_text(item.get('direction'))}"
         )
+        if item.get("is_retransmit"):
+            line += "  RETX"
+        lines.append(line)
     return "\n".join(lines)
 
 
@@ -231,7 +311,9 @@ class PacketAnalyzer:
     """Bọc danh sách sự kiện và cung cấp các thao tác cho GUI."""
 
     def __init__(self, events: Iterable[Any] | None = None):
-        self._events = filter_packets(events or [])
+        # Gắn cờ is_retransmit trên toàn bộ capture ngay từ đầu để mọi bộ lọc
+        # về sau vẫn dùng cùng một kết quả nhận diện.
+        self._events = mark_retransmissions(events or [])
 
     @classmethod
     def from_api(cls, payload: dict) -> PacketAnalyzer:
@@ -275,10 +357,12 @@ class PacketAnalyzer:
 
 __all__ = [
     "PACKET_COLUMNS",
+    "PACKET_COLUMNS_WITH_RETRANSMIT",
     "PacketAnalyzer",
     "PacketFilter",
     "filter_packets",
     "format_table",
     "group_by_conversation",
+    "mark_retransmissions",
     "summarize_packets",
 ]
