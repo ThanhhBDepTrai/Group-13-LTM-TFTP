@@ -1,325 +1,767 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TFTP Pro – Web Console</title>
-  <style>
-    :root { --bg:#F3F6FB; --card:#FFFFFF; --accent:#2563EB; --text:#243247; --muted:#718096; --danger:#C2413A; --border:#DCE3ED; --navy:#172B4D; }
-    * { box-sizing:border-box; }
-    body { margin:0; font-family:Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--text); }
-    header { padding:16px 24px; background:var(--navy); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; color:#fff; }
-    header h1 { color:#fff; }
-    header h1 { margin:0; font-size:20px; }
-    .container { max-width:1200px; margin:24px auto; padding:0 16px; }
-    .card { background:var(--card); border-radius:12px; padding:16px; margin-bottom:16px; box-shadow:0 4px 12px rgba(0,0,0,.08); border:1px solid var(--border); }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    input, button, select, textarea { padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:#fff; color:var(--text); }
-    button { background:var(--accent); color:#fff; border:none; cursor:pointer; font-weight:600; }
-    button.secondary { background:#E8EEF7; color:var(--navy); }
-    button.danger { background:var(--danger); color:#fff; }
-    table { width:100%; border-collapse:collapse; }
-    th, td { padding:8px; border-bottom:1px solid var(--border); text-align:left; font-size:13px; vertical-align:top; }
-    .muted { color:var(--muted); font-size:13px; }
-    .hidden { display:none; }
-    .login { max-width:400px; margin:80px auto; }
-    .status { padding:8px 12px; border-radius:8px; background:#EAF0F7; color:var(--navy); }
-    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
-    nav button { margin-right:6px; }
-    pre { background:#F3F6FB; padding:12px; border-radius:8px; overflow:auto; max-height:300px; border:1px solid var(--border); }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TFTP PRO – Web Console</title>
+<style>
+  :root{
+    --bg:#0b0c10;
+    --card: rgba(17, 17, 25, 0.6);
+    --card-border: rgba(255, 255, 255, 0.06);
+    --accent-1: #8b5cf6;
+    --accent-2: #ec489a;
+    --accent-3: #f59e0b;
+    --accent-4: #10b981;
+    --grad-hero: linear-gradient(135deg, #8b5cf6 0%, #d946ef 50%, #f59e0b 100%);
+    --text: #f8fafc;
+    --muted: #94a3b8;
+    --danger: #f43f5e;
+    --success: #34d399;
+    --radius: 24px;
+    --shadow: 0 20px 40px -10px rgba(0,0,0,0.5);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+  }
+  .mesh{position:fixed; inset:0; z-index:-1; overflow:hidden;}
+  .blob{position:absolute; width:600px; height:600px; border-radius:50%; filter:blur(80px); opacity:0.45; animation:move 14s ease-in-out infinite alternate;}
+  .b1{top:-10%; left:-10%; background:#8b5cf6;}
+  .b2{top:10%; right:-10%; background:#ec489a; animation-delay:-4s;}
+  .b3{bottom:-15%; left:20%; background:#22d3ee; animation-delay:-8s;}
+  @keyframes move{from{transform:translate(0,0) scale(1);}to{transform:translate(80px,60px) scale(1.15);}}
+
+  header{
+    height:64px; background: rgba(15,17,25,0.6); backdrop-filter: blur(12px);
+    display:flex; align-items:center; justify-content:space-between; padding:0 28px;
+    border-bottom:1px solid var(--card-border); z-index:50; position:sticky; top:0;
+  }
+  header h1{margin:0;font-size:17px;letter-spacing:-0.5px;background:var(--grad-hero);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+  .user-badge{
+    background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1);
+    padding:7px 14px; border-radius:999px; font-size:12.5px; color:#fff; backdrop-filter: blur(6px);
+  }
+
+  .sidebar{
+    width:250px; height:calc(100vh - 64px); position:fixed; top:64px; left:0;
+    background: rgba(15,17,25,0.5); backdrop-filter: blur(14px);
+    border-right:1px solid var(--card-border); z-index:40; overflow-y:auto;
+  }
+  .sidebar a{
+    display:flex; align-items:center; gap:12px; padding:12px 20px; color:#cbd5e1;
+    text-decoration:none; font-size:13.5px; border-left:4px solid transparent; transition:all .25s;
+  }
+  .sidebar a:hover{background: rgba(255,255,255,0.05); color:#fff; border-left:4px solid var(--accent-2);}
+  .sidebar a.active{background: rgba(139,92,246,0.15); color:#fff; border-left:4px solid var(--accent-1);}
+
+  .main{
+    margin-left:250px; height:calc(100vh - 64px); overflow-y:auto; padding:32px 40px 60px;
+    display:flex; flex-direction:column; gap:24px;
+  }
+
+  .card{
+    background: var(--card); border:1px solid var(--card-border); border-radius:var(--radius);
+    padding:24px; box-shadow: var(--shadow); backdrop-filter: blur(10px);
+  }
+  .card h2{margin:0 0 16px 0; font-size:18px; display:flex; align-items:center; gap:10px;}
+  .card h3{margin:0 0 10px 0; font-size:13px; color:#94a3b8;}
+  .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px;}
+  .toolbar{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;}
+
+  input,select,textarea{
+    background: rgba(255,255,255,0.04); border:1px solid var(--card-border); color:#fff;
+    padding:10px 14px; border-radius:14px; font-size:13.5px; outline:none;
+  }
+  input:focus,select:focus{border-color:var(--accent-1); box-shadow:0 0 0 3px rgba(139,92,246,0.15);}
+
+  button{
+    cursor:pointer; font-weight:600; border:none; border-radius:12px;
+    padding:9px 16px; font-size:13px; color:#fff; transition:transform .2s, filter .2s;
+    background: var(--grad-hero);
+  }
+  button:hover{transform:translateY(-1px); filter:brightness(1.15);}
+  button:active{transform:translateY(0);}
+  button.secondary{
+    background: rgba(255,255,255,0.06); border:1px solid var(--card-border); color:#cbd5e1;
+  }
+  button.secondary:hover{background: rgba(255,255,255,0.12); color:#fff;}
+  button.danger{background: linear-gradient(135deg,#f43f5e,#ef4444);}
+  button.success{background: linear-gradient(135deg,#10b981,#34d399);}
+  button.info{background: linear-gradient(135deg,#22d3ee,#3b82f6);}
+  button.small{padding:6px 12px; font-size:12px; border-radius:10px;}
+  button:disabled{opacity:0.55; cursor:not-allowed; transform:none;}
+
+  table{width:100%; border-collapse: collapse; font-size:13px;}
+  th,td{padding:10px; border-bottom:1px solid rgba(255,255,255,0.04); text-align:left; vertical-align:middle;}
+  tr:hover td{background: rgba(255,255,255,0.03);}
+  .badge{
+    display:inline-block; padding:3px 10px; border-radius:999px; font-size:11.5px; font-weight:600;
+  }
+  .badge.ok{background: rgba(52,211,153,0.15); color:#34d399; border:1px solid rgba(52,211,153,0.25);}
+  .badge.err{background: rgba(244,63,94,0.15); color:#f43f5e; border:1px solid rgba(244,63,94,0.25);}
+  .badge.info{background: rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(59,130,246,0.25);}
+  .badge.mid{background: rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.25);}
+
+  .muted{color:#94a3b8;font-size:12.5px;}
+  .hidden{display:none !important;}
+  .grid{display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:14px;}
+  .stat{background: rgba(255,255,255,0.03); border:1px solid var(--card-border); padding:16px; border-radius:16px;}
+  .stat .v{font-size:22px; font-weight:700; color:#fff; margin-top:2px;}
+  .stat .l{font-size:12px; color:#94a3b8; margin-top:4px;}
+  #toast{position:fixed; bottom:24px; left:50%; transform:translateX(-50%); padding:12px 20px; border-radius:12px;
+    color:#fff; font-weight:600; z-index:100; display:none; box-shadow:0 12px 30px rgba(0,0,0,0.4);
+    background: rgba(15,17,25,0.9); border:1px solid rgba(255,255,255,0.1); backdrop-filter: blur(12px);}
+  #toast.ok{background: linear-gradient(135deg,#10b981,#34d399);}
+  #toast.err{background: linear-gradient(135deg,#f43f5e,#ef4444);}
+
+  .login{
+    width:100%; max-width:400px; margin:18vh auto; text-align:center;
+  }
+  .login .card{width:100%;}
+  .login .input-group{margin-bottom:14px; text-align:left;}
+  .login input{width:100%; padding:11px 16px;}
+  .empty{padding:32px; color:#94a3b8; text-align:center; border:1px dashed rgba(255,255,255,0.08); border-radius:16px;}
+  .progress{width:100%; height:7px; background: rgba(255,255,255,0.06); border-radius:999px; overflow:hidden; margin-top:6px;}
+  .progress > div{height:100%; background: var(--grad-hero); width:0%;}
+  .mono{font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11.5px;}
+  .canvas-wrap{background: rgba(255,255,255,0.02); border:1px solid var(--card-border); border-radius:16px; padding:14px; height:260px; overflow:auto;}
+  .file-icon{margin-right:6px; opacity:0.9;}
+  .tab-content{animation: fadeUp .4s ease;}
+  @keyframes fadeUp{from{opacity:0; transform:translateY(14px);}to{opacity:1; transform:none;}}
+  .btn-group{display:flex; gap:8px;}
+  .compact-table td,.compact-table th{padding:8px 10px; font-size:12.5px;}
+  input[type="file"]{padding:6px 8px;}
+  .pill{display:inline-flex; gap:6px; padding:4px 10px; border-radius:999px; background: rgba(255,255,255,0.05); border:1px solid var(--card-border); font-size:12px; color:#cbd5e1;}
+  .debug{margin-top:10px;font-family:monospace;font-size:11px;color:#94a3b8;max-height:120px;overflow:auto;background:rgba(0,0,0,0.3);padding:8px;border-radius:8px;display:none;}
+</style>
 </head>
 <body>
-  <header>
-    <h1>TFTP Pro – Web Console (Full)</h1>
-    <div id="userBadge" class="muted">Chưa đăng nhập</div>
-  </header>
 
-  <div id="loginView" class="container login">
+<div class="mesh">
+  <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+</div>
+
+<header>
+  <h1>🚀 TFTP PRO</h1>
+  <div class="user-badge" id="userBadge">Chưa đăng nhập</div>
+</header>
+
+<div class="sidebar hidden" id="sidebar">
+  <a href="#" class="nav-item active" id="nav-dashboard" onclick="showTab('dashboard')">📊 Dashboard</a>
+  <a href="#" class="nav-item" id="nav-files" onclick="showTab('files')">📁 File Manager</a>
+  <a href="#" class="nav-item" id="nav-transfer" onclick="showTab('transfer')">📤 Truyền file</a>
+  <a href="#" class="nav-item" id="nav-packets" onclick="showTab('packets')">📦 Packet Analyzer</a>
+  <a href="#" class="nav-item" id="nav-users" onclick="showTab('users')">👥 Người dùng</a>
+  <a href="#" class="nav-item" id="nav-employee" onclick="showTab('employee')">👤 Nhân viên</a>
+  <a href="#" class="nav-item" id="nav-pxe" onclick="showTab('pxe')">💻 PXE</a>
+  <a href="#" class="nav-item" id="nav-versions" onclick="showTab('versions')">📦 Phiên bản</a>
+  <a href="#" class="nav-item" id="nav-quota" onclick="showTab('quota')">📊 Quota</a>
+  <a href="#" class="nav-item" id="nav-sim" onclick="showTab('sim')">⚡ Simulator</a>
+  <a href="#" class="nav-item" id="nav-logout" onclick="logout()" style="color:var(--danger);">🚪 Đăng xuất</a>
+</div>
+
+<!-- LOGIN (luôn hiển thị khi chưa có token, nằm ngoài mainArea) -->
+<div id="loginView" class="login">
+  <div class="card">
+    <h2>🔐 Đăng nhập Admin API</h2>
+    <div class="input-group" style="text-align:left;margin:18px 0;">
+      <label style="display:block;margin-bottom:6px;font-size:12px;color:#94a3b8;">Tên đăng nhập</label>
+      <input id="loginUser" placeholder="admin" value="admin" />
+    </div>
+    <div class="input-group" style="text-align:left;margin-bottom:18px;">
+      <label style="display:block;margin-bottom:6px;font-size:12px;color:#94a3b8;">Mật khẩu</label>
+      <input id="loginPass" type="password" placeholder="Nhập mật khẩu" />
+    </div>
+    <button onclick="doLogin()" style="width:100%;padding:12px;">Đăng nhập</button>
+    <p id="loginErr" class="muted" style="color:var(--danger);margin-top:12px;"></p>
+    <div id="loginDebug" class="debug"></div>
+    <p class="muted small" style="margin-top:14px;">Mật khẩu lấy từ biến môi trường <code style="color:#d946ef;">TFTP_ADMIN_PASSWORD</code> của server.</p>
+  </div>
+</div>
+
+<!-- Ứng dụng chính (chỉ hiện sau khi đăng nhập) -->
+<div class="main hidden" id="mainArea">
+
+  <!-- DASHBOARD -->
+  <div id="tab-dashboard" class="tab-content hidden">
     <div class="card">
-      <h2>Đăng nhập</h2>
-      <div class="row"><input id="username" placeholder="Tên đăng nhập" value="admin" /></div>
-      <div class="row" style="margin-top:8px;"><input id="password" type="password" placeholder="Mật khẩu" /></div>
-      <div class="row" style="margin-top:12px;"><button onclick="login()">Đăng nhập</button></div>
-      <p id="loginError" class="muted"></p>
+      <h2>📊 Dashboard</h2>
+      <div class="toolbar"><button class="secondary small" onclick="loadDashboard()">🔄 Refresh</button></div>
+      <div class="grid" id="dashStats">
+        <div class="stat"><div class="v" id="statTotal">-</div><div class="l">Tổng transfer</div></div>
+        <div class="stat"><div class="v" id="statUp">-</div><div class="l">Upload</div></div>
+        <div class="stat"><div class="v" id="statDown">-</div><div class="l">Download</div></div>
+        <div class="stat"><div class="v" id="statBytes">-</div><div class="l">Dung lượng (B)</div></div>
+      </div>
+      <div class="card" style="margin-top:20px;">
+        <h3>Giao dịch gần đây</h3>
+        <table class="compact-table">
+          <thead><tr><th>Thời gian</th><th>Loại</th><th>File</th><th>Kích thước</th><th>Trạng thái</th></tr></thead>
+          <tbody id="dashTbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
-  <div id="appView" class="container hidden">
+  <!-- FILE MANAGER -->
+  <div id="tab-files" class="tab-content hidden">
     <div class="card">
-      <nav class="row">
-        <button onclick="showTab('dashboard')">Dashboard</button>
-        <button class="secondary" onclick="showTab('files')">Files</button>
-        <button class="secondary" onclick="showTab('packets')">Packets</button>
-        <button class="secondary" onclick="showTab('users')">Users</button>
-        <button class="secondary" onclick="showTab('pxe')">PXE</button>
-        <button class="secondary" onclick="showTab('sim')">Simulator</button>
-        <button class="secondary" onclick="showTab('versions')">Versions/Quota</button>
-        <button class="secondary" onclick="showTab('tickets')">Tickets</button>
-        <button class="danger" onclick="logout()">Đăng xuất</button>
-      </nav>
-    </div>
-
-    <div id="tab-dashboard" class="card">
-      <h2>Dashboard & Metrics</h2>
-      <div class="grid">
-        <div class="status" id="statTotal">Total transfers: -</div>
-        <div class="status" id="statBytes">Bytes download: -</div>
-      </div>
-      <div class="row" style="margin-top:12px;">
-        <button class="secondary" onclick="loadDashboard()">Refresh</button>
-      </div>
-      <pre id="dashRaw" class="muted"></pre>
-    </div>
-
-    <div id="tab-files" class="card hidden">
-      <h2>File Manager</h2>
+      <h2>📁 File Manager</h2>
       <div class="row">
-        <input id="uploadPath" placeholder="đường/dẫn/file.txt" />
-        <input id="uploadFile" type="file" />
-        <button onclick="uploadFile()">Upload</button>
-        <button class="secondary" onclick="loadFiles()">Refresh</button>
+        <input id="curPath" placeholder="Đường dẫn thư mục" readonly style="flex:1;" />
+        <button class="secondary small" onclick="promptMkdir()">+ Thư mục</button>
+        <button class="secondary small" onclick="loadFiles(document.getElementById('curPath').value || '')">🔄</button>
       </div>
-      <table style="margin-top:12px;">
-        <thead><tr><th>Tên</th><th>Kích thước</th><th>Hành động</th></tr></thead>
-        <tbody id="fileTable"></tbody>
+      <div class="row" style="margin-top:10px;">
+        <input id="fileInput" type="file" />
+        <button onclick="uploadFile()" class="success">⬆ Upload file</button>
+        <span class="muted">Tải lên thư mục hiện tại</span>
+      </div>
+      <div id="uploadProgress" class="hidden"><div class="progress"><div id="uploadBar"></div></div><span id="uploadPct" class="muted"></span></div>
+      <table class="compact-table">
+        <thead><tr><th>Tên</th><th>Kích thước</th><th>SHA-256</th><th>Hành động</th></tr></thead>
+        <tbody id="filesTbody"></tbody>
       </table>
     </div>
+  </div>
 
-    <div id="tab-packets" class="card hidden">
-      <h2>Packet Analyzer</h2>
+  <!-- TRANSFER -->
+  <div id="tab-transfer" class="tab-content hidden">
+    <div class="card">
+      <h2>📤 Truyền file</h2>
+      <p class="muted">Trình duyệt không gọi trực tiếp UDP/TFTP. File được gửi qua Admin API (HTTP), backend lưu vào server.</p>
       <div class="row">
-        <button class="secondary" onclick="loadPackets()">Refresh</button>
+        <input id="tfPath" placeholder="Tên file trên server (ví dụ: README.md)" style="flex:1;" />
+        <input id="tfLocal" type="file" />
       </div>
-      <table style="margin-top:12px;">
-        <thead><tr><th>Time</th><th>Opcode</th><th>Source</th><th>Dest</th><th>Dir</th></tr></thead>
-        <tbody id="packetTable"></tbody>
-      </table>
+      <div class="row" style="margin-top:10px;">
+        <button onclick="httpUpload()" class="success">⬆ Upload lên server</button>
+        <button onclick="httpDownload()" class="info">⬇ Tải từ server</button>
+        <button onclick="httpVerify()" class="secondary small">🔍 Kiểm tra SHA-256</button>
+      </div>
+      <div id="tfProgress" class="hidden"><div class="progress"><div id="tfBar"></div></div><span id="tfPct" class="muted"></span></div>
+      <div id="tfResult" class="muted" style="margin-top:10px;"></div>
     </div>
+  </div>
 
-    <div id="tab-users" class="card hidden">
-      <h2>Users (RBAC)</h2>
+  <!-- PACKETS -->
+  <div id="tab-packets" class="tab-content hidden">
+    <div class="card">
+      <h2>📦 Packet Analyzer</h2>
       <div class="row">
-        <input id="newUser" placeholder="username" />
-        <input id="newPass" placeholder="password" />
-        <select id="newRole">
-          <option value="user">user</option>
-          <option value="admin">admin</option>
-          <option value="guest">guest</option>
+        <button class="secondary small" onclick="loadPackets()">🔄 Refresh</button>
+        <select id="packetOpcode" onchange="loadPackets()">
+          <option value="">Tất cả opcode</option>
+          <option value="RRQ">RRQ</option><option value="WRQ">WRQ</option>
+          <option value="DATA">DATA</option><option value="ACK">ACK</option><option value="ERROR">ERROR</option>
         </select>
-        <button onclick="createUser()">Tạo</button>
-        <button class="secondary" onclick="loadUsers()">Refresh</button>
       </div>
-      <table style="margin-top:12px;">
-        <thead><tr><th>Username</th><th>Role</th><th>Active</th></tr></thead>
-        <tbody id="userTable"></tbody>
-      </table>
-    </div>
-
-    <div id="tab-pxe" class="card hidden">
-      <h2>PXE Profiles</h2>
-      <div class="row"><button class="secondary" onclick="loadPxe()">Refresh</button></div>
-      <pre id="pxeRaw" class="muted"></pre>
-    </div>
-
-    <div id="tab-sim" class="card hidden">
-      <h2>Network Simulator</h2>
-      <div class="row">
-        <label>Loss rate: <input id="lossRate" type="number" step="0.01" min="0" max="0.5" value="0" style="width:90px" /></label>
-        <label>Delay ms: <input id="delayMs" type="number" min="0" max="500" value="0" style="width:90px" /></label>
-        <button onclick="applySim()">Áp dụng</button>
+      <div class="canvas-wrap">
+        <table class="compact-table">
+          <thead><tr><th>Thời gian</th><th>Opcode</th><th>Block</th><th>Nguồn</th><th>Đích</th><th>Hướng</th><th>Kích thước</th></tr></thead>
+          <tbody id="packetsTbody"></tbody>
+        </table>
       </div>
-      <p id="simStatus" class="muted"></p>
-    </div>
-
-    <div id="tab-versions" class="card hidden">
-      <h2>Versions & Quota</h2>
-      <div class="row">
-        <input id="verFile" placeholder="file.txt" />
-        <button class="secondary" onclick="loadVersions()">Xem versions</button>
-      </div>
-      <div id="verList" class="muted" style="margin-top:8px;"></div>
-      <div class="row" style="margin-top:12px;">
-        <input id="restoreVer" placeholder="tên file .bak" />
-        <button onclick="restoreVersion()">Khôi phục</button>
-      </div>
-      <div class="row" style="margin-top:12px;">
-        <input id="deptId" placeholder="department id" />
-        <button class="secondary" onclick="loadQuota()">Xem quota</button>
-      </div>
-      <p id="quotaStatus" class="muted"></p>
-    </div>
-
-    <div id="tab-tickets" class="card hidden">
-      <h2>Transfer Ticket</h2>
-      <div class="row">
-        <input id="ticketFile" placeholder="file.txt" />
-        <select id="ticketMode"><option value="read">read</option><option value="write">write</option></select>
-        <button onclick="authorizeTicket()">Xin vé</button>
-      </div>
-      <p id="ticketStatus" class="muted"></p>
     </div>
   </div>
 
-  <script>
-    let token = null;
-    const api = (path, opts={}) => fetch(path, {
-      ...opts,
-      headers: { ...(opts.headers||{}), ...(token?{Authorization:'Bearer '+token}:{}) }
+  <!-- USERS -->
+  <div id="tab-users" class="tab-content hidden">
+    <div class="card">
+      <h2>👥 Quản lý người dùng</h2>
+      <div class="row">
+        <input id="newUser" placeholder="Tên đăng nhập" />
+        <select id="newUserRole"><option>user</option><option>admin</option><option>guest</option></select>
+        <input id="newUserPass" type="password" placeholder="Mật khẩu" />
+        <button onclick="createUser()" class="success small">Tạo</button>
+        <button class="secondary small" onclick="loadUsers()">🔄</button>
+      </div>
+      <table class="compact-table">
+        <thead><tr><th>Username</th><th>Vai trò</th><th>Hoạt động</th><th>Hành động</th></tr></thead>
+        <tbody id="usersTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- EMPLOYEE -->
+  <div id="tab-employee" class="tab-content hidden">
+    <div class="card">
+      <h2>👤 Hồ sơ nhân viên</h2>
+      <p class="muted">Tài khoản có role EMPLOYEE trên Admin API Enterprise.</p>
+      <div class="row"><button class="secondary small" onclick="loadUsers()">🔄 Load tài khoản</button></div>
+      <table class="compact-table">
+        <thead><tr><th>Tên tài khoản</th><th>Vai trò</th><th>Hoạt động</th><th>Hành động</th></tr></thead>
+        <tbody id="employeeTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- PXE -->
+  <div id="tab-pxe" class="tab-content hidden">
+    <div class="card">
+      <h2>💻 PXE Boot Profiles</h2>
+      <div class="row">
+        <input id="pxeName" placeholder="Tên profile (ví dụ: lab-default)" />
+        <input id="pxeBootfile" placeholder="Boot file (undionly.kpxe / ipxe.efi)" />
+        <button onclick="createPxe()" class="success small">Tạo profile</button>
+        <button class="secondary small" onclick="loadPxe()">🔄</button>
+      </div>
+      <table class="compact-table">
+        <thead><tr><th>Tên</th><th>Boot file</th><th>Hành động</th></tr></thead>
+        <tbody id="pxeTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- VERSIONS -->
+  <div id="tab-versions" class="tab-content hidden">
+    <div class="card">
+      <h2>📦 Lịch sử phiên bản file</h2>
+      <div class="row">
+        <input id="verName" placeholder="Tên file (ví dụ: config.json)" />
+        <button onclick="loadVersions()" class="secondary small">Xem phiên bản</button>
+      </div>
+      <table class="compact-table">
+        <thead><tr><th>Tên file</th><th>Thời gian</th><th>Kích thước</th><th>SHA-256</th><th>Hành động</th></tr></thead>
+        <tbody id="versionsTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- QUOTA -->
+  <div id="tab-quota" class="tab-content hidden">
+    <div class="card">
+      <h2>📊 Dung lượng phòng ban (Quota)</h2>
+      <div class="row">
+        <input id="quotaDep" placeholder="ID phòng ban" />
+        <button onclick="loadQuota()" class="secondary small">Xem quota</button>
+      </div>
+      <div id="quotaResult" class="muted" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <!-- SIMULATOR -->
+  <div id="tab-sim" class="tab-content hidden">
+    <div class="card">
+      <h2>⚡ Giả lập mạng & Vé truyền</h2>
+      <div class="row">
+        <label style="font-size:12px;color:#94a3b8;">Rớt gói: </label>
+        <select id="simLoss"><option value="0">0%</option><option value="0.05">5%</option><option value="0.10">10%</option><option value="0.20">20%</option></select>
+        <label style="margin-left:16px;font-size:12px;color:#94a3b8;">Độ trễ: </label>
+        <select id="simDelay"><option value="0">0 ms</option><option value="20">20 ms</option><option value="50">50 ms</option><option value="100">100 ms</option></select>
+        <button onclick="setSimConfig()" class="success small">Áp dụng config</button>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <input id="ticketFile" placeholder="Tên file cần vé" style="flex:1;" />
+        <select id="ticketMode"><option>read</option><option>write</option></select>
+        <button onclick="authorizeTicket()" class="info small">Xin vé (30s)</button>
+      </div>
+      <div id="simResult" class="muted" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ==================== STATE & UTIL ==================== */
+let token = localStorage.getItem('tftp_token') || '';
+let currentPath = '';
+let useDirectBackend = false; // nếu true, gọi trực tiếp :6971 thay vì qua render_server
+
+function $id(id){return document.getElementById(id);}
+function toast(msg,type){
+  const t=$id('toast'); t.textContent=msg; t.className=type?'err':'ok'; t.style.display='block';
+  setTimeout(()=>t.style.display='none',3000);
+}
+function dbg(msg){
+  const d=$id('loginDebug');
+  if(d){ d.style.display='block'; d.textContent += '\n> '+msg; console.log(msg); }
+}
+function authHeaders(){
+  const h={}; if(token) h['Authorization']='Bearer '+token; return h;
+}
+function getBaseUrl(){
+  // Nếu dùng trực tiếp backend, gọi :6971. N không, gọi /api (qua render_server :10000)
+  return useDirectBackend ? 'http://127.0.0.1:6971' : '';
+}
+async function api(method,path,body){
+  const base = getBaseUrl();
+  const fullUrl = base + '/api' + path;
+  const headers=Object.assign({},authHeaders());
+  let b=body;
+  if(b && !(b instanceof FormData)){
+    headers['Content-Type']='application/json'; b=JSON.stringify(b);
+  }
+  dbg('API '+method+' '+fullUrl);
+  try{
+    const res=await fetch(fullUrl,{method,headers,body:b});
+    if(res.status===401){token='';localStorage.removeItem('tftp_token');location.reload();throw new Error('Phiên hết hạn, vui lòng đăng nhập lại');}
+    if(!res.ok){
+      let msg=res.statusText;
+      try{const j=await res.json(); msg=j.error||j.message||msg;}catch(e){}
+      throw new Error(msg);
+    }
+    const ct=res.headers.get('content-type')||'';
+    if(ct.includes('application/json')) return res.json();
+    return res.text();
+  }catch(e){
+    dbg('Lỗi: '+e.message);
+    throw e;
+  }
+}
+function esc(t){return String(t).replace(/[&<>"']/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));}
+function escHtmlAttr(s){return String(s).replace(/'/g,"&#39;");}
+
+/* ==================== AUTH ==================== */
+async function doLogin(){
+  const u=$id('loginUser').value.trim(); const p=$id('loginPass').value;
+  const err=$id('loginErr'); const dbgDiv=$id('loginDebug');
+  err.textContent=''; dbgDiv.style.display='none'; dbgDiv.textContent='';
+  if(!u||!p){err.textContent='Nhập đủ tài khoản/mật khẩu';return;}
+  try{
+    dbg('Bắt đầu login...');
+    const d=await api('POST','/auth/login',{username:u,password:p});
+    dbg('Phản hồi server: '+JSON.stringify(d));
+    token=d.token||d.access_token||'';
+    if(!token){err.textContent='Không nhận được token từ server';return;}
+    localStorage.setItem('tftp_token',token);
+    err.textContent='';
+    $id('loginView').classList.add('hidden');
+    $id('sidebar').classList.remove('hidden');
+    $id('mainArea').classList.remove('hidden');
+    $id('userBadge').textContent='Đăng nhập: '+u;
+    showTab('dashboard');
+  }catch(e){
+    err.textContent=e.message;
+    dbg('Lỗi chi tiết: '+e.message);
+    // Nếu lỗi kết nối qua render_server, thử trực tiếp backend
+    if(!useDirectBackend && (e.message.includes('failed to fetch') || e.message.includes('Network'))){
+      useDirectBackend = true;
+      dbg('Thử kết nối trực tiếp backend :6971...');
+      err.textContent='Máy chủ proxy không phản hồi, thử kết nối trực tiếp backend...';
+      setTimeout(doLogin, 800);
+    }
+  }
+}
+function logout(){
+  api('POST','/auth/logout').catch(()=>{});
+  token='';localStorage.removeItem('tftp_token');location.reload();
+}
+
+/* ==================== NAV ==================== */
+function showTab(name){
+  document.querySelectorAll('.tab-content').forEach(el=>el.classList.add('hidden'));
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+  $id('tab-'+name).classList.remove('hidden');
+  $id('nav-'+name).classList.add('active');
+  if(name==='dashboard') loadDashboard();
+  else if(name==='files') loadFiles(currentPath||'');
+  else if(name==='packets') loadPackets();
+  else if(name==='users') loadUsers();
+  else if(name==='employee') loadUsers();
+  else if(name==='pxe') loadPxe();
+}
+if(token){
+  $id('loginView').classList.add('hidden');
+  $id('sidebar').classList.remove('hidden');
+  $id('mainArea').classList.remove('hidden');
+  showTab('dashboard');
+}
+
+/* ==================== DASHBOARD ==================== */
+async function loadDashboard(){
+  try{
+    const d=await api('GET','/dashboard?limit=20');
+    const stats=d.stats||{};
+    $id('statTotal').textContent=stats.total_transfers||'-';
+    $id('statUp').textContent=stats.uploads||'-';
+    $id('statDown').textContent=stats.downloads||'-';
+    $id('statBytes').textContent=(stats.bytes||0).toLocaleString()+' B';
+    const tb=$id('dashTbody'); tb.innerHTML='';
+    (d.recent||[]).forEach(r=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML='<td>'+esc(r.time||'-')+'</td><td><span class="badge '+(r.type==='upload'?'ok':'')+'">'+esc(r.type||'-')+'</span></td><td>'+esc(r.path||'-')+'</td><td>'+esc(r.size||'-')+'</td><td><span class="badge '+(r.status==='ok'?'ok':'err')+'">'+esc(r.status||'-')+'</span></td>';
+      tb.appendChild(tr);
     });
+  }catch(e){toast(e.message);}
+}
 
-    async function login() {
-      const u = document.getElementById('username').value;
-      const p = document.getElementById('password').value;
-      const res = await fetch('/api/auth/login', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({username:u, password:p})
-      });
-      if (!res.ok) { document.getElementById('loginError').textContent='Đăng nhập thất bại'; return; }
-      const data = await res.json();
-      token = data.token;
-      document.getElementById('userBadge').textContent = data.username + ' (' + data.role + ')';
-      document.getElementById('loginView').classList.add('hidden');
-      document.getElementById('appView').classList.remove('hidden');
-      loadDashboard();
-    }
+/* ==================== FILE MANAGER ==================== */
+async function loadFiles(path){
+  currentPath=path||'';
+  $id('curPath').value=currentPath;
+  try{
+    const d=await api('GET','/files?path='+encodeURIComponent(currentPath));
+    const tb=$id('filesTbody'); tb.innerHTML='';
+    (d.entries||[]).forEach(e=>{
+      const isDir=e.is_directory;
+      const tr=document.createElement('tr');
+      tr.innerHTML=
+        '<td><span class="file-icon">'+(isDir?'📁':'📄')+'</span>'+esc(e.name)+'</td>'+
+        '<td>'+(isDir?'—':(e.size||0).toLocaleString()+' B')+'</td>'+
+        '<td class="mono muted">'+(e.sha256?e.sha256.slice(0,12)+'…':'—')+'</td>'+
+        '<td>'+
+          (isDir?'<button class="small secondary" onclick="loadFiles(\''+escHtmlAttr(e.relative_path)+'\')">Vào</button>':
+            '<button class="small success" onclick="downloadFile(\''+escHtmlAttr(e.relative_path)+'\')">⬇</button> '+
+            '<button class="small danger" onclick="deleteFile(\''+escHtmlAttr(e.relative_path)+'\')">✕</button>')+
+        '</td>';
+      tb.appendChild(tr);
+    });
+  }catch(e){toast(e.message);}
+}
+async function promptMkdir(){
+  const p=prompt('Nhập tên thư mục (ví dụ: new_folder hoặc sub/folder):');
+  if(!p)return;
+  try{
+    await api('POST','/files/mkdir',{path:currentPath?(currentPath+'/'+p):p});
+    toast('Đã tạo thư mục');
+    loadFiles(currentPath);
+  }catch(e){toast(e.message);}
+}
+async function uploadFile(){
+  const input=$id('fileInput');
+  if(!input.files[0]){toast('Chọn file trước');return;}
+  const file=input.files[0];
+  const targetPath=currentPath?(currentPath+'/'+file.name):file.name;
+  const prog=$id('uploadProgress'); prog.classList.remove('hidden');
+  const bar=$id('uploadBar'); const pct=$id('uploadPct');
+  try{
+    const base = getBaseUrl();
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST',base+'/api/files/upload?path='+encodeURIComponent(targetPath),true);
+    xhr.setRequestHeader('Authorization','Bearer '+token);
+    xhr.upload.onprogress=function(ev){if(ev.lengthComputable){const p=Math.round(ev.loaded/ev.total*100);bar.style.width=p+'%';pct.textContent=p+' %';}};
+    xhr.onload=function(){
+      if(xhr.status>=200&&xhr.status<300){toast('Upload '+file.name+' thành công');input.value='';prog.classList.add('hidden');bar.style.width='0%';loadFiles(currentPath);}
+      else{toast('Upload thất bại: '+xhr.statusText);}
+    };
+    xhr.onerror=function(){toast('Lỗi mạng khi upload');};
+    xhr.send(file);
+  }catch(e){toast(e.message);}
+}
+async function downloadFile(name){
+  const full=currentPath?(currentPath+'/'+name):name;
+  try{
+    const base = getBaseUrl();
+    const res=await fetch(base+'/api/files/download?path='+encodeURIComponent(full),{headers:authHeaders()});
+    if(!res.ok){toast('Tải thất bại');return;}
+    const blob=await res.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=name; a.click();
+    URL.revokeObjectURL(url);
+  }catch(e){toast(e.message);}
+}
+async function deleteFile(name){
+  if(!confirm('Xóa "'+name+'"?'))return;
+  const full=currentPath?(currentPath+'/'+name):name;
+  try{
+    await api('DELETE','/files?path='+encodeURIComponent(full));
+    toast('Đã xóa');
+    loadFiles(currentPath);
+  }catch(e){toast(e.message);}
+}
 
-    function logout() { token=null; location.reload(); }
+/* ==================== TRANSFER ==================== */
+async function httpUpload(){
+  const input=$id('tfLocal');
+  if(!input.files[0]){toast('Chọn file local trước');return;}
+  const file=input.files[0];
+  const name=$id('tfPath').value.trim()||file.name;
+  const prog=$id('tfProgress'); prog.classList.remove('hidden');
+  const bar=$id('tfBar'); const pct=$id('tfPct');
+  try{
+    const base = getBaseUrl();
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST',base+'/api/files/upload?path='+encodeURIComponent(name),true);
+    xhr.setRequestHeader('Authorization','Bearer '+token);
+    xhr.upload.onprogress=function(ev){if(ev.lengthComputable){const p=Math.round(ev.loaded/ev.total*100);bar.style.width=p+'%';pct.textContent=p+' %';}};
+    xhr.onload=function(){
+      if(xhr.status>=200&&xhr.status<300){toast('Upload '+name+' thành công');prog.classList.add('hidden');bar.style.width='0%';$id('tfResult').textContent='Đã lưu file: '+name;}
+      else{toast('Upload thất bại: '+xhr.statusText);}
+    };
+    xhr.send(file);
+  }catch(e){toast(e.message);}
+}
+async function httpDownload(){
+  const name=$id('tfPath').value.trim();
+  if(!name){toast('Nhập tên file');return;}
+  try{
+    const base = getBaseUrl();
+    const res=await fetch(base+'/api/files/download?path='+encodeURIComponent(name),{headers:authHeaders()});
+    if(!res.ok){toast('Tải thất bại');return;}
+    const blob=await res.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=name; a.click();
+    URL.revokeObjectURL(url);
+  }catch(e){toast(e.message);}
+}
+async function httpVerify(){
+  const name=$id('tfPath').value.trim();
+  if(!name){toast('Nhập tên file');return;}
+  try{
+    const d=await api('POST','/api/files/verify',{path:name,sha256:''});
+    $id('tfResult').textContent='Kết quả verify: '+JSON.stringify(d);
+  }catch(e){toast(e.message);}
+}
 
-    function showTab(id) {
-      document.querySelectorAll('[id^="tab-"]').forEach(e=>e.classList.add('hidden'));
-      document.getElementById('tab-'+id).classList.remove('hidden');
-    }
+/* ==================== PACKETS ==================== */
+async function loadPackets(){
+  const op=$id('packetOpcode').value;
+  let path='/packets?limit=200';
+  if(op) path+='&opcode='+op;
+  try{
+    const d=await api('GET',path);
+    const tb=$id('packetsTbody'); tb.innerHTML='';
+    (d.events||[]).forEach(e=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML='<td>'+esc(e.time||'-')+'</td><td><span class="badge info">'+esc(e.opcode||'-')+'</span></td><td>'+esc(e.block||'-')+'</td><td>'+esc(e.src||'-')+'</td><td>'+esc(e.dst||'-')+'</td><td>'+esc(e.dir||'-')+'</td><td>'+esc(e.size||'-')+'</td>';
+      tb.appendChild(tr);
+    });
+  }catch(e){toast(e.message);}
+}
 
-    async function loadDashboard() {
-      const res = await api('/api/dashboard');
-      const data = await res.json();
-      document.getElementById('statTotal').textContent = 'Total transfers: ' + (data.stats?.total_transfers ?? 0);
-      document.getElementById('statBytes').textContent = 'Bytes download: ' + (data.stats?.bytes_download ?? 0);
-      document.getElementById('dashRaw').textContent = JSON.stringify(data, null, 2);
-    }
-
-    async function loadFiles() {
-      const res = await api('/api/files');
-      const data = await res.json();
-      const tbody = document.getElementById('fileTable');
-      tbody.innerHTML = '';
-      for (const e of (data.entries||[])) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${e.name}</td><td>${e.size}</td>
-          <td><button class="secondary" onclick="downloadFile('${e.relative_path}')">Download</button>
-          <button class="secondary" onclick="deleteFile('${e.relative_path}')">Delete</button></td>`;
-        tbody.appendChild(tr);
+/* ==================== USERS ==================== */
+async function loadUsers(){
+  try{
+    const d=await api('GET','/users');
+    const tb=$id('usersTbody'); tb.innerHTML='';
+    const eb=$id('employeeTbody'); eb.innerHTML='';
+    (d.users||[]).forEach(u=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML='<td>'+esc(u.username||'-')+'</td><td>'+esc(u.role||'-')+'</td><td><span class="badge '+(u.active?'ok':'')+'">'+(u.active?'Active':'Inactive')+'</span></td><td>'+
+        '<button class="small danger" onclick="delUser(\''+escHtmlAttr(u.username)+'\')">Xóa</button> '+
+        '<button class="small secondary" onclick="chgRole(\''+escHtmlAttr(u.username)+'\')">Đổi role</button>'+
+        '</td>';
+      tb.appendChild(tr);
+      if(u.role==='employee'||u.role==='EMPLOYEE'){
+        const etr=document.createElement('tr');
+        etr.innerHTML='<td>'+esc(u.username||'-')+'</td><td>'+esc(u.role||'-')+'</td><td><span class="badge '+(u.active?'ok':'')+'">'+(u.active?'Active':'Inactive')+'</span></td><td></td>';
+        eb.appendChild(etr);
       }
-    }
+    });
+  }catch(e){toast(e.message);}
+}
+async function createUser(){
+  const u=$id('newUser').value.trim(); const r=$id('newUserRole').value; const p=$id('newUserPass').value;
+  if(!u||!p){toast('Nhập đủ tên và mật khẩu');return;}
+  try{
+    await api('POST','/users',{username:u,password:p,role:r});
+    toast('Đã tạo user '+u);
+    $id('newUser').value='';$id('newUserPass').value='';
+    loadUsers();
+  }catch(e){toast(e.message);}
+}
+async function delUser(u){
+  if(!confirm('Xóa user "'+u+'"?'))return;
+  try{
+    await api('DELETE','/users?username='+encodeURIComponent(u));
+    toast('Đã xóa');
+    loadUsers();
+  }catch(e){toast(e.message);}
+}
+async function chgRole(u){
+  const r=prompt('Role mới (admin/user/guest):');
+  if(!r)return;
+  try{
+    await api('POST','/users/role',{username:u,role:r});
+    toast('Đã đổi role');
+    loadUsers();
+  }catch(e){toast(e.message);}
+}
 
-    async function downloadFile(path) {
-      const res = await api('/api/files/download?path='+encodeURIComponent(path));
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href=url; a.download=path.split('/').pop(); a.click();
-      URL.revokeObjectURL(url);
-    }
+/* ==================== PXE ==================== */
+async function loadPxe(){
+  try{
+    const d=await api('GET','/pxe/profiles');
+    const tb=$id('pxeTbody'); tb.innerHTML='';
+    (d.profiles||[]).forEach(p=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML='<td>'+esc(p.name||'-')+'</td><td>'+esc(p.bootfile||'-')+'</td><td>'+
+        '<button class="small danger" onclick="delPxe(\''+escHtmlAttr(p.name||'')+'\')">Xóa</button>'+
+        '</td>';
+      tb.appendChild(tr);
+    });
+  }catch(e){toast(e.message);}
+}
+async function createPxe(){
+  const n=$id('pxeName').value.trim(); const b=$id('pxeBootfile').value.trim();
+  if(!n){toast('Nhập tên profile');return;}
+  try{
+    await api('POST','/pxe/profiles',{name:n,bootfile:b});
+    toast('Đã tạo PXE profile');
+    $id('pxeName').value='';$id('pxeBootfile').value='';
+    loadPxe();
+  }catch(e){toast(e.message);}
+}
+async function delPxe(n){
+  if(!confirm('Xóa PXE profile "'+n+'"?'))return;
+  try{
+    await api('DELETE','/pxe/profiles?name='+encodeURIComponent(n));
+    toast('Đã xóa');
+    loadPxe();
+  }catch(e){toast(e.message);}
+}
 
-    async function deleteFile(path) {
-      await api('/api/files?path='+encodeURIComponent(path), {method:'DELETE'});
-      loadFiles();
-    }
+/* ==================== VERSIONS ==================== */
+async function loadVersions(){
+  const n=$id('verName').value.trim();
+  if(!n){toast('Nhập tên file');return;}
+  try{
+    const d=await api('GET','/v1/files/'+encodeURIComponent(n)+'/versions');
+    const tb=$id('versionsTbody'); tb.innerHTML='';
+    (d.versions||[]).forEach(v=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML='<td>'+esc(n)+'</td><td>'+esc(v.timestamp||'-')+'</td><td>'+esc(v.size||'-')+'</td><td class="mono muted">'+esc(v.sha256||'-')+'</td><td><button class="small secondary" onclick="restoreVer(\''+escHtmlAttr(n)+'\',\''+escHtmlAttr(v.filename||'')+'\')">Khôi phục</button></td>';
+      tb.appendChild(tr);
+    });
+  }catch(e){toast(e.message);}
+}
+async function restoreVer(name,file){
+  try{
+    await api('POST','/v1/files/'+encodeURIComponent(name)+'/restore',{filename:file});
+    toast('Đã khôi phục phiên bản');
+    loadVersions();
+  }catch(e){toast(e.message);}
+}
 
-    async function uploadFile() {
-      const path = document.getElementById('uploadPath').value;
-      const file = document.getElementById('uploadFile').files[0];
-      if (!path || !file) return alert('Thiếu path/file');
-      const buf = await file.arrayBuffer();
-      await api('/api/files/upload?path='+encodeURIComponent(path), {method:'POST', body:buf});
-      loadFiles();
-    }
+/* ==================== QUOTA ==================== */
+async function loadQuota(){
+  const dep=$id('quotaDep').value.trim();
+  if(!dep){toast('Nhập ID phòng ban');return;}
+  try{
+    const d=await api('GET','/v1/departments/'+encodeURIComponent(dep)+'/quota');
+    $id('quotaResult').innerHTML='<div class="kv" style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span>Phòng ban</span><strong>'+esc(dep)+'</strong></div>'+
+      '<div class="kv" style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span>Đã dùng</span><strong>'+(d.used_bytes||0).toLocaleString()+' B</strong></div>'+
+      '<div class="kv" style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span>Hạn mức</span><strong>'+(d.limit_bytes||0).toLocaleString()+' B</strong></div>'+
+      '<div class="kv" style="padding:6px 0;"><span>Sử dụng</span><strong>'+(d.percent||0)+'%</strong></div>';
+  }catch(e){toast(e.message);}
+}
 
-    async function loadPackets() {
-      const res = await api('/api/packets?limit=100');
-      const data = await res.json();
-      const tbody = document.getElementById('packetTable');
-      tbody.innerHTML = '';
-      for (const e of (data.events||[])) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${e.timestamp||''}</td><td>${e.opcode||''}</td><td>${e.source||''}</td><td>${e.destination||''}</td><td>${e.direction||''}</td>`;
-        tbody.appendChild(tr);
-      }
-    }
-
-    async function loadUsers() {
-      const res = await api('/api/users');
-      const data = await res.json();
-      const tbody = document.getElementById('userTable');
-      tbody.innerHTML = '';
-      for (const u of (data.users||[])) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${u.username}</td><td>${u.role}</td><td>${u.active}</td>`;
-        tbody.appendChild(tr);
-      }
-    }
-
-    async function createUser() {
-      const username = document.getElementById('newUser').value;
-      const password = document.getElementById('newPass').value;
-      const role = document.getElementById('newRole').value;
-      await api('/api/users', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({username, password, role})});
-      loadUsers();
-    }
-
-    async function loadPxe() {
-      const res = await api('/api/pxe/profiles');
-      const data = await res.json();
-      document.getElementById('pxeRaw').textContent = JSON.stringify(data, null, 2);
-    }
-
-    async function applySim() {
-      const loss_rate = parseFloat(document.getElementById('lossRate').value);
-      const delay_ms = parseInt(document.getElementById('delayMs').value, 10);
-      const res = await api('/api/v1/simulator/config', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({loss_rate, delay_ms})});
-      const data = await res.json();
-      document.getElementById('simStatus').textContent = JSON.stringify(data);
-    }
-
-    async function loadVersions() {
-      const file = document.getElementById('verFile').value;
-      const res = await api('/api/v1/files/'+encodeURIComponent(file)+'/versions');
-      const data = await res.json();
-      const div = document.getElementById('verList');
-      div.innerHTML = '';
-      (data.versions||[]).forEach(v => {
-        const p = document.createElement('p');
-        p.textContent = v.name + ' | ' + v.size + ' bytes | ' + v.timestamp;
-        div.appendChild(p);
-      });
-    }
-
-    async function restoreVersion() {
-      const file = document.getElementById('verFile').value;
-      const version = document.getElementById('restoreVer').value;
-      const res = await api('/api/v1/files/'+encodeURIComponent(file)+'/restore', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({version})});
-      const data = await res.json();
-      alert('Restored: ' + JSON.stringify(data.entry||data));
-    }
-
-    async function loadQuota() {
-      const id = document.getElementById('deptId').value;
-      const res = await api('/api/v1/departments/'+encodeURIComponent(id)+'/quota');
-      const data = await res.json();
-      document.getElementById('quotaStatus').textContent = JSON.stringify(data);
-    }
-
-    async function authorizeTicket() {
-      const filename = document.getElementById('ticketFile').value;
-      const mode = document.getElementById('ticketMode').value;
-      const res = await api('/api/v1/transfers/authorize', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({filename, mode})});
-      const data = await res.json();
-      document.getElementById('ticketStatus').textContent = JSON.stringify(data);
-    }
-  </script>
+/* ==================== SIMULATOR & TICKETS ==================== */
+async function setSimConfig(){
+  const loss=$id('simLoss').value; const delay=$id('simDelay').value;
+  try{
+    await api('POST','/v1/simulator/config',{loss_rate:parseFloat(loss),delay_ms:parseInt(delay)});
+    toast('Đã áp dụng config simulate');
+  }catch(e){toast(e.message);}
+}
+async function authorizeTicket(){
+  const f=$id('ticketFile').value.trim(); const m=$id('ticketMode').value;
+  if(!f){toast('Nhập tên file');return;}
+  try{
+    const d=await api('POST','/v1/transfers/authorize',{filename:f,mode:m});
+    $id('simResult').innerHTML='<div class="kv" style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span>Vé</span><strong>'+esc(d.token||'-')+'</strong></div>'+
+      '<div class="kv" style="padding:6px 0;"><span>Hạn dùng</span><strong>'+esc(d.expires_at||'-')+'</strong></div>';
+    toast('Đã cấp vé transfers');
+  }catch(e){toast(e.message);}
+}
+</script>
 </body>
 </html>
