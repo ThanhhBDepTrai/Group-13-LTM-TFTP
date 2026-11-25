@@ -42,12 +42,14 @@ _BASIC = {"files.list", "files.read", "tasks.update"}
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "SUPER_ADMIN": _ALL,
     "ADMIN": _ALL - {"roles.manage"},
-    "HR": _BASIC | {"employees.manage", "employees.read", "users.manage", "files.upload"},
-    "MANAGER": _BASIC | {"employees.read", "files.upload", "files.delete", "files.manage",
-                         "tasks.manage", "audit.read"},
-    "TEAM_LEADER": _BASIC | {"employees.read", "files.upload", "tasks.manage"},
-    "EMPLOYEE": _BASIC | {"files.upload"},
-    "INTERN": set(_BASIC),
+    "HR": _BASIC | {"employees.manage", "employees.read", "users.manage", "files.upload",
+                    "files.download"},
+    "MANAGER": _BASIC | {"files.download", "files.upload", "files.delete", "files.rename",
+                         "files.mkdir", "files.manage", "employees.read", "tasks.manage",
+                         "stats.read", "audit.read"},
+    "TEAM_LEADER": _BASIC | {"files.download", "files.upload", "tasks.manage", "employees.read"},
+    "EMPLOYEE": _BASIC | {"files.upload", "files.download"},
+    "INTERN": _BASIC | {"files.download"},
     "GUEST": {"files.list", "files.read", "files.download"},
 }
 

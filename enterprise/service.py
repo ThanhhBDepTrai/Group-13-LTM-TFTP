@@ -64,6 +64,26 @@ class EnterpriseService:
         self.audit.log(username, "auth.login")
         return session
 
+    def ensure_demo_accounts(self, password: str = "Admin123@") -> None:
+        demos = [
+            ("manager1", "MANAGER", "Quản lý mẫu"),
+            ("staff1", "EMPLOYEE", "Nhân viên mẫu"),
+            ("guest1", "GUEST", "Khách mẫu"),
+        ]
+        for username, role, full_name in demos:
+            try:
+                self.accounts.get_user(username)
+            except Exception:
+                try:
+                    self.accounts.create_user(username, password, role)
+                except Exception:
+                    continue
+            # ensure profile exists (best effort)
+            try:
+                self.employees.create(full_name, username=username)
+            except Exception:
+                pass
+
     def authenticate(self, token: str) -> dict:
         return self.accounts.validate_token(token)
 

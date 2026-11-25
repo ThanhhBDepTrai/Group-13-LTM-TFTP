@@ -156,6 +156,12 @@ def main(argv=None) -> int:
                         "Workspace Enterprise chưa có tài khoản. Đặt "
                         "TFTP_SUPER_ADMIN_PASSWORD (tối thiểu 8 ký tự) rồi chạy lại."
                     )
+            if os.environ.get("TFTP_DEMO_ACCOUNTS", "").lower() in ("1", "true", "yes"):
+                try:
+                    enterprise.ensure_demo_accounts()
+                    logger.info("Đã đảm bảo các tài khoản demo (manager1, staff1, guest1).")
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Không tạo được tài khoản demo: %s", exc)
         api = AdminAPIServer(
             server.storage,
             auth,

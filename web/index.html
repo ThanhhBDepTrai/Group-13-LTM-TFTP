@@ -11,23 +11,23 @@
      ============================================================ */
   :root{
     color-scheme: light;
-    --bg:#F4F6F9;
+    --bg:#F6F8FC;
     --surface:#FFFFFF;
-    --surface-2:#F2F4F7;
-    --surface-3:#E7EBF0;
-    --border:#E1E6EE;
-    --border-strong:#CBD5E1;
-    --text:#101828;
-    --text-2:#344054;
-    --muted:#667085;
-    --accent:#0D9488;
-    --accent-hover:#0B7F75;
-    --accent-soft:#E6FFFA;
-    --accent-text:#0F766E;
-    --navy:#172B4D;
-    --navy-2:#1E3A5F;
+    --surface-2:#F1F5FB;
+    --surface-3:#E6ECF6;
+    --border:#E2E8F2;
+    --border-strong:#C7D3E4;
+    --text:#14213A;
+    --text-2:#33415C;
+    --muted:#5E6E88;
+    --accent:#2563EB;
+    --accent-hover:#1D4ED8;
+    --accent-soft:#EBF2FF;
+    --accent-text:#1D4ED8;
+    --navy:#2563EB;
+    --navy-2:#1D4ED8;
     --on-navy:#FFFFFF;
-    --on-navy-muted:#B9C9DF;
+    --on-navy-muted:#C4D3E8;
     --ok:#15803D;
     --ok-soft:#ECFDF3;
     --warn:#B45309;
@@ -37,7 +37,7 @@
     --danger-soft:#FEF3F2;
     --info:#0369A1;
     --info-soft:#EFF8FF;
-    --ring:rgba(13,148,136,.20);
+    --ring:rgba(37,99,235,.18);
 
     --r-sm:8px;
     --r-md:12px;
@@ -48,7 +48,7 @@
     --sh-2:0 4px 12px rgba(16,24,40,.08);
     --sh-3:0 18px 40px rgba(16,24,40,.16);
 
-    --topbar-h:60px;
+    --topbar-h:62px;
     --sidebar-w:248px;
     --rail-w:76px;
 
@@ -56,8 +56,7 @@
     --icon-sm:16px;
     --icon-lg:24px;
   }
-  @media (prefers-color-scheme: dark){
-    :root{
+  html[data-theme="dark"]{
       color-scheme: dark;
       --bg:#0F1117;
       --surface:#151922;
@@ -68,14 +67,14 @@
       --text:#E6E9EF;
       --text-2:#C3C9D4;
       --muted:#98A2B3;
-      --accent:#2DD4BF;
-      --accent-hover:#5EEAD4;
-      --accent-soft:#0F2E2B;
-      --accent-text:#5EEAD4;
-      --navy:#111827;
-      --navy-2:#111827;
+      --accent:#60A5FA;
+      --accent-hover:#93C5FD;
+      --accent-soft:#12233F;
+      --accent-text:#93C5FD;
+      --navy:#131C2E;
+      --navy-2:#131C2E;
       --on-navy:#F8FAFC;
-      --on-navy-muted:#94A3B8;
+      --on-navy-muted:#C4D3E8;
       --ok:#4ADE80;
       --ok-soft:#0B2417;
       --warn:#FBBF24;
@@ -85,11 +84,10 @@
       --danger-soft:#2A1113;
       --info:#38BDF8;
       --info-soft:#082033;
-      --ring:rgba(45,212,191,.22);
+      --ring:rgba(96,165,250,.24);
       --sh-1:0 1px 2px rgba(0,0,0,.4);
       --sh-2:0 6px 16px rgba(0,0,0,.45);
       --sh-3:0 20px 48px rgba(0,0,0,.6);
-    }
   }
 
   /* ============================================================
@@ -146,7 +144,7 @@
     display:flex;align-items:center;justify-content:center;
     background:rgba(255,255,255,.10);
     border:1px solid rgba(255,255,255,.14);
-    color:#5EEAD4;
+    color:#93C5FD;
   }
   .brand-text h1{font-size:14.5px;letter-spacing:.6px;font-weight:700;line-height:1.1;}
   .brand-text p{font-size:11px;color:var(--on-navy-muted);letter-spacing:.2px;}
@@ -167,7 +165,9 @@
     color:inherit;cursor:pointer;transition:background .15s,border-color .15s;
   }
   .icon-btn:hover{background:rgba(255,255,255,.10);}
-  .menu-btn{display:none;}
+  .menu-btn{display:inline-flex;}
+  html[data-theme="dark"] .icon-moon{display:none;}
+  html:not([data-theme="dark"]) .icon-sun{display:none;}
 
   /* ============================================================
      Shell
@@ -175,15 +175,19 @@
   .layout{display:flex;flex:1;align-items:flex-start;min-height:0;}
 
   .sidebar{
-    position:sticky;top:var(--topbar-h);
-    flex:0 0 var(--sidebar-w);width:var(--sidebar-w);
+    position:fixed;left:0;top:var(--topbar-h);
+    width:var(--sidebar-w);
     height:calc(100vh - var(--topbar-h));
     overflow-y:auto;
     padding:14px 10px 20px;
     background:var(--surface);
     border-right:1px solid var(--border);
     z-index:40;
+    transform:translateX(-102%);
+    transition:transform .2s ease;
+    box-shadow:var(--sh-3);
   }
+  .sidebar.open{transform:none;}
   .nav-group{margin-bottom:14px;}
   .nav-group-title{
     padding:8px 10px 6px;
@@ -589,11 +593,21 @@
   @media (prefers-reduced-motion: reduce){
     *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important;}
   }
-  @media (prefers-color-scheme: dark){
-    .btn-primary{color:#04201D;}
-    .btn-danger{color:#250A0A;}
-  }
+  html[data-theme="dark"] .btn-primary{color:#0B1220;}
+  html[data-theme="dark"] .btn-danger{color:#250A0A;}
 </style>
+<script>
+(function(){
+  try {
+    var stored = localStorage.getItem('tftp_theme');
+    var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var theme = stored || (prefersDark ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', theme);
+  } catch (e) {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+})();
+</script>
 </head>
 <body>
 
@@ -609,7 +623,9 @@
   <symbol id="i-packets" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m12 12 8-4.5M12 12v9M12 12 4 7.5"/></symbol>
   <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 20v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1"/><circle cx="9" cy="7" r="3.2"/><path d="M22 20v-1a4 4 0 0 0-3-3.87M16.5 4.2a3.4 3.4 0 0 1 0 6.6"/></symbol>
   <symbol id="i-user" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
-  <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6.5" rx="2"/><rect x="3" y="13.5" width="18" height="6.5" rx="2"/><path d="M7 7.25h.01M7 16.75h.01"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.3 4.3l1.6 1.6M18.1 18.1l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.3 19.7l1.6-1.6M18.1 5.9l1.6-1.6"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4 6.5 6.5 0 0 0 20 14.5z"/></symbol>
+<symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6.5" rx="2"/><rect x="3" y="13.5" width="18" height="6.5" rx="2"/><path d="M7 7.25h.01M7 16.75h.01"/></symbol>
   <symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3 4.5V9h4.5"/><path d="M12 7.5V12l3 1.8"/></symbol>
   <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4 18a9 9 0 1 1 16 0"/><path d="m12 14 3.8-3.8"/><circle cx="12" cy="14" r="1.4"/></symbol>
   <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2.5 4.5 14H11l-1 7.5L19.5 10H13z"/></symbol>
@@ -644,6 +660,10 @@
   </div>
   <div class="topbar-spacer"></div>
   <div class="topbar-right">
+    <button class="icon-btn" id="themeBtn" type="button" aria-label="Đổi giao diện sáng/tối" title="Sáng/Tối" onclick="toggleTheme()">
+      <svg class="icon icon-moon" aria-hidden="true"><use href="#i-moon"></use></svg>
+      <svg class="icon icon-sun" aria-hidden="true"><use href="#i-sun"></use></svg>
+    </button>
     <div class="user-badge hidden" id="userBadge">Chưa đăng nhập</div>
     <button class="icon-btn hidden" id="logoutBtn" type="button" aria-label="Đăng xuất" title="Đăng xuất" onclick="logout()">
       <svg class="icon" aria-hidden="true"><use href="#i-logout"></use></svg>
@@ -758,6 +778,13 @@
           <button id="loginBtn" class="btn btn-primary" style="width:100%;padding:11px;" type="button" onclick="doLogin()">
             <svg class="icon icon-sm" aria-hidden="true"><use href="#i-logout"></use></svg>Đăng nhập
           </button>
+
+          <div class="quick-login" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="quickLogin('admin')">Admin</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="quickLogin('manager1')">Manager</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="quickLogin('staff1')">Employee</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="quickLogin('guest1')">Guest</button>
+          </div>
 
           <p id="loginErr" class="form-error" role="alert"></p>
           <div id="loginDebug" class="debug" aria-hidden="true"></div>
@@ -941,7 +968,7 @@
         <div class="page-head">
           <div>
             <h2><svg class="icon" aria-hidden="true"><use href="#i-users"></use></svg>Quản lý người dùng</h2>
-            <p class="page-sub">Tài khoản Workspace với vai trò SUPER_ADMIN, ADMIN, HR, MANAGER, TEAM_LEADER, EMPLOYEE, INTERN hoặc GUEST.</p>
+            <p class="page-sub">Tài khoản Workspace với 4 vai trò cốt lõi: Admin, Manager, Employee, Guest.</p>
           </div>
           <div class="page-actions">
             <button class="btn btn-secondary" type="button" onclick="loadUsers()">
@@ -1556,6 +1583,12 @@ function emptyRow(tbody, cols, title, hint, actionsHtml){
 /* ============================================================
    Sidebar
    ============================================================ */
+function toggleTheme(){
+  const cur = document.documentElement.getAttribute('data-theme') || 'light';
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('tftp_theme', next); } catch (e) {}
+}
 function toggleSidebar(){
   const sb = $id('sidebar');
   const open = sb.classList.toggle('open');
@@ -1652,6 +1685,12 @@ async function doLogin(){
       }
     }
   });
+}
+
+function quickLogin(u){
+  $id('loginUser').value = u;
+  $id('loginPass').value = '';
+  $id('loginPass').focus();
 }
 
 async function resumeSession(){
@@ -2137,8 +2176,9 @@ function isNotFound(e){ return e && e.status === 404; }
 
 async function loadRoles(){
   try {
-    const d = await api('GET', '/ent/roles');
-    rolesCache = d.roles || [];
+     const d = await api('GET', '/ent/roles');
+     const core = new Set(['SUPER_ADMIN','MANAGER','EMPLOYEE','GUEST']);
+     rolesCache = (d.roles || []).filter(function(r){ return core.has(String(r.name || '').toUpperCase()); });
   } catch (e){
     rolesCache = Object.keys(ROLE_LABELS).map(function(name, index){
       return { name: name, level: 100 - index * 10, description: ROLE_LABELS[name] };

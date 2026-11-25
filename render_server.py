@@ -25,7 +25,8 @@ ENTERPRISE_ROOT = WORKSPACE_DIR / "files"
 def _start_backend() -> subprocess.Popen:
     env = os.environ.copy()
     if "TFTP_ADMIN_PASSWORD" not in env:
-        env["TFTP_ADMIN_PASSWORD"] = "ChangeMe123!"
+        env["TFTP_ADMIN_PASSWORD"] = "Admin123@"
+    env.setdefault("TFTP_DEMO_ACCOUNTS", "1")
     cmd = [
         sys.executable,
         str(ROOT / "tftp_pro.py"),

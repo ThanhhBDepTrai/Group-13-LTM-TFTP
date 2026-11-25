@@ -210,40 +210,58 @@ class TFTPApp(tk.Tk):
             pass
 
         self.palette = {
-            "navy": "#172B4D",
-            "navy_light": "#243F66",
+            "navy": "#1E3557",
+            "navy_light": "#2C4A75",
+            "navy_soft": "#E9EFF9",
             "blue": "#2563EB",
             "blue_hover": "#1D4ED8",
-            "background": "#F3F6FB",
+            "blue_soft": "#EDF4FF",
+            "background": "#F5F8FC",
             "surface": "#FFFFFF",
-            "border": "#DCE3ED",
-            "text": "#243247",
-            "muted": "#718096",
+            "surface_alt": "#F0F4FA",
+            "border": "#DEE6F2",
+            "border_strong": "#C8D4E6",
+            "text": "#1B2A41",
+            "muted": "#5F7189",
             "green": "#16865B",
+            "green_soft": "#E8F7F0",
             "red": "#C2413A",
+            "amber": "#B45309",
         }
-        self.configure(bg=self.palette["background"])
-        style.configure(".", font=("Segoe UI", 10), foreground=self.palette["text"])
-        style.configure("TFrame", background=self.palette["background"])
-        style.configure("TLabel", background=self.palette["background"], foreground=self.palette["text"])
-        style.configure("TLabelframe", background=self.palette["surface"], bordercolor=self.palette["border"], relief="solid")
-        style.configure("TLabelframe.Label", background=self.palette["surface"], foreground=self.palette["navy"], font=("Segoe UI", 10, "bold"))
-        style.configure("TEntry", padding=(9, 7), fieldbackground=self.palette["surface"], bordercolor=self.palette["border"])
-        style.configure("TCombobox", padding=(8, 6), fieldbackground=self.palette["surface"], bordercolor=self.palette["border"])
-        style.configure("TSpinbox", padding=(8, 6), fieldbackground=self.palette["surface"])
-        style.configure("TButton", padding=(12, 8), background="#E8EEF7", foreground=self.palette["navy"], borderwidth=0, focusthickness=0, font=("Segoe UI", 9, "bold"))
-        style.map("TButton", background=[("active", "#D8E3F2"), ("pressed", "#CBD8E9"), ("disabled", "#EEF1F5")], foreground=[("disabled", "#9AA5B4")])
-        style.configure("Accent.TButton", background=self.palette["blue"], foreground="#FFFFFF")
-        style.map("Accent.TButton", background=[("active", self.palette["blue_hover"]), ("pressed", self.palette["navy_light"])], foreground=[("disabled", "#D8E1EF")])
-        style.configure("TNotebook", background=self.palette["background"], borderwidth=0, tabmargins=(3, 5, 3, 0))
-        style.configure("TNotebook.Tab", padding=(18, 11), background="#E8EDF5", foreground=self.palette["muted"], font=("Segoe UI", 9, "bold"), borderwidth=0)
-        style.map("TNotebook.Tab", background=[("selected", self.palette["surface"]), ("active", "#DDE7F4")], foreground=[("selected", self.palette["blue"]), ("active", self.palette["navy"])])
-        style.configure("Treeview", background=self.palette["surface"], fieldbackground=self.palette["surface"], foreground=self.palette["text"], rowheight=31, borderwidth=0, font=("Segoe UI", 9))
-        style.configure("Treeview.Heading", background="#EAF0F7", foreground=self.palette["navy"], relief="flat", padding=(9, 9), font=("Segoe UI", 9, "bold"))
-        style.map("Treeview", background=[("selected", "#DCEAFE")], foreground=[("selected", self.palette["navy"])])
-        style.configure("Horizontal.TProgressbar", troughcolor="#E5EAF2", background=self.palette["blue"], bordercolor="#E5EAF2", lightcolor=self.palette["blue"], darkcolor=self.palette["blue"], thickness=12)
-        style.configure("TCheckbutton", background=self.palette["surface"])
-        style.configure("TRadiobutton", background=self.palette["surface"])
+        p = self.palette
+        self.configure(bg=p["background"])
+        style.configure(".", font=("Segoe UI", 10), foreground=p["text"], background=p["background"])
+        style.configure("TFrame", background=p["background"])
+        style.configure("TLabel", background=p["background"], foreground=p["text"])
+        style.configure("Muted.TLabel", background=p["background"], foreground=p["muted"])
+        style.configure("Surface.TFrame", background=p["surface"])
+        style.configure("Surface.TLabel", background=p["surface"], foreground=p["text"])
+        style.configure("SurfaceMuted.TLabel", background=p["surface"], foreground=p["muted"])
+        style.configure("TLabelframe", background=p["surface"], bordercolor=p["border"], relief="solid", borderwidth=1, padding=(10, 8))
+        style.configure("TLabelframe.Label", background=p["surface"], foreground=p["navy"], font=("Segoe UI", 10, "bold"))
+        style.configure("TEntry", padding=(10, 8), fieldbackground=p["surface"], bordercolor=p["border_strong"], lightcolor=p["border_strong"], darkcolor=p["border_strong"], insertcolor=p["text"])
+        style.configure("TCombobox", padding=(9, 7), fieldbackground=p["surface"], bordercolor=p["border_strong"], lightcolor=p["border_strong"], darkcolor=p["border_strong"], arrowcolor=p["muted"])
+        style.configure("TSpinbox", padding=(9, 7), fieldbackground=p["surface"], bordercolor=p["border_strong"], lightcolor=p["border_strong"], darkcolor=p["border_strong"], insertcolor=p["text"])
+        style.configure("TButton", padding=(14, 9), background=p["surface_alt"], foreground=p["navy"], borderwidth=0, focusthickness=0, font=("Segoe UI", 9, "bold"), relief="flat")
+        style.map("TButton", background=[("active", "#E2EAF6"), ("pressed", "#D5DFEE"), ("disabled", "#EEF2F8")], foreground=[("disabled", "#9AA5B4")])
+        style.configure("Accent.TButton", background=p["blue"], foreground="#FFFFFF", padding=(14, 9), font=("Segoe UI", 9, "bold"))
+        style.map("Accent.TButton", background=[("active", p["blue_hover"]), ("pressed", p["navy_light"])], foreground=[("disabled", "#DDE6F7")])
+        style.configure("TNotebook", background=p["background"], borderwidth=0, tabmargins=(4, 6, 4, 0))
+        style.configure("TNotebook.Tab", padding=(20, 12), background=p["surface_alt"], foreground=p["muted"], font=("Segoe UI", 9, "bold"), borderwidth=0)
+        style.map("TNotebook.Tab", background=[("selected", p["surface"]), ("active", "#E6ECF8")], foreground=[("selected", p["blue"]), ("active", p["navy"])])
+        style.configure("Treeview", background=p["surface"], fieldbackground=p["surface"], foreground=p["text"], rowheight=32, borderwidth=0, font=("Segoe UI", 9))
+        style.configure("Treeview.Heading", background=p["surface_alt"], foreground=p["navy"], relief="flat", padding=(10, 10), font=("Segoe UI", 9, "bold"))
+        style.map("Treeview", background=[("selected", p["blue_soft"])], foreground=[("selected", p["text"])])
+        style.configure("Horizontal.TProgressbar", troughcolor=p["surface_alt"], background=p["blue"], bordercolor=p["surface_alt"], lightcolor=p["blue"], darkcolor=p["blue"], thickness=12)
+        style.configure("TCheckbutton", background=p["surface"], foreground=p["text"])
+        style.configure("TRadiobutton", background=p["surface"], foreground=p["text"])
+        style.configure("TScrollbar", background=p["surface_alt"], troughcolor=p["background"], bordercolor=p["background"], arrowcolor=p["muted"], gripcount=0)
+        style.map("TScrollbar", background=[("active", p["border_strong"])])
+        style.configure("TSeparator", background=p["border"])
+        self.option_add("*TCombobox*Listbox.background", p["surface"])
+        self.option_add("*TCombobox*Listbox.foreground", p["text"])
+        self.option_add("*TCombobox*Listbox.selectBackground", p["blue_soft"])
+        self.option_add("*TCombobox*Listbox.selectForeground", p["text"])
 
     # ------------------------------------------------------------------ #
     # Helper
@@ -261,92 +279,86 @@ class TFTPApp(tk.Tk):
         self.geometry("1000x680")
         self.minsize(850, 600)
 
-        bg_color = "#F3F6FA"
-        primary = "#1E3A5F"
-        text_color = "#243447"
-        muted = "#718096"
-        self.configure(bg=bg_color)
+        p = self.palette
+        self.configure(bg=p["background"])
 
-        main = tk.Frame(self, bg=bg_color)
+        main = tk.Frame(self, bg=p["background"])
         main.pack(fill=tk.BOTH, expand=True)
 
-        header = tk.Frame(main, bg=primary, height=210)
+        header = tk.Frame(main, bg=p["navy"], height=168)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
 
-        tk.Label(
-            header, text="ENTERPRISE FILE MANAGER",
-            font=("Segoe UI", 25, "bold"), fg="white", bg=primary,
-        ).pack(pady=(48, 8))
-        tk.Label(
-            header, text="WORKSPACE  •  FILE MANAGEMENT  •  TFTP TRANSFER",
-            font=("Segoe UI", 10), fg="#C8D6E5", bg=primary,
-        ).pack()
+        brand = tk.Frame(header, bg=p["navy"])
+        brand.pack(side=tk.LEFT, fill=tk.Y, padx=30, pady=20)
+        tk.Label(brand, text="TFTP PRO", bg=p["navy"], fg="#FFFFFF",
+                 font=("Segoe UI", 22, "bold")).pack(anchor="w")
+        tk.Label(brand, text="ENTERPRISE FILE MANAGEMENT", bg=p["navy"],
+                 fg="#C4D3E8", font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(2, 0))
+        tk.Label(header, text="TRANSFER  •  MONITOR  •  MANAGE", bg=p["navy"],
+                 fg="#DCE6F5", font=("Segoe UI", 10)).pack(side=tk.RIGHT, padx=30)
 
-        content = tk.Frame(main, bg=bg_color)
-        content.pack(fill=tk.BOTH, expand=True, padx=70, pady=35)
+        content = tk.Frame(main, bg=p["background"])
+        content.pack(fill=tk.BOTH, expand=True, padx=60, pady=28)
 
         tk.Label(
             content, text="Chào mừng bạn!",
-            font=("Segoe UI", 23, "bold"), fg=text_color, bg=bg_color,
-        ).pack(pady=(5, 8))
+            font=("Segoe UI", 22, "bold"), fg=p["text"], bg=p["background"],
+        ).pack(anchor="w", pady=(0, 6))
         tk.Label(
             content, text="Bạn muốn bắt đầu bằng cách nào?",
-            font=("Segoe UI", 11), fg=muted, bg=bg_color,
-        ).pack(pady=(0, 25))
+            font=("Segoe UI", 11), fg=p["muted"], bg=p["background"],
+        ).pack(anchor="w", pady=(0, 22))
 
-        cards = tk.Frame(content, bg=bg_color)
+        cards = tk.Frame(content, bg=p["background"])
         cards.pack(fill=tk.X, expand=True)
         cards.columnconfigure(0, weight=1)
         cards.columnconfigure(1, weight=1)
 
-        create_card = tk.Frame(
-            cards, bg="white", highlightbackground="#DCE4ED",
-            highlightthickness=1, padx=22, pady=25,
-        )
-        create_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12), ipady=15)
-        tk.Label(create_card, text="＋", font=("Segoe UI", 35, "bold"),
-                 fg="#269B69", bg="white").pack(pady=(5, 10))
-        tk.Label(create_card, text="Create Server", font=("Segoe UI", 17, "bold"),
-                 fg=text_color, bg="white").pack()
-        tk.Label(create_card, text="Create New Workspace", font=("Segoe UI", 10),
-                 fg="#269B69", bg="white").pack(pady=(4, 12))
-        tk.Label(
-            create_card,
-            text="Tạo Workspace mới cho công ty.\nThiết lập thông tin tổ chức và\ntài khoản SUPER_ADMIN đầu tiên.",
-            font=("Segoe UI", 10), fg=muted, bg="white", justify=tk.CENTER,
-        ).pack(pady=(0, 22))
-        ttk.Button(create_card, text="CREATE SERVER",
-                   command=self._open_create_server).pack(fill=tk.X, ipady=7)
-        ttk.Button(
-            create_card,
-            text="LOGIN TO SAVED WORKSPACE",
-            command=self._open_saved_workspace_login,
-        ).pack(fill=tk.X, ipady=7, pady=(8, 0))
+        def make_card(parent, column, title, subtitle, accent, badge, description, primary_text, primary_cmd, secondary_text=None, secondary_cmd=None):
+            card = tk.Frame(parent, bg=p["surface"], highlightbackground=p["border"],
+                            highlightthickness=1, padx=24, pady=24)
+            card.grid(row=0, column=column, sticky="nsew",
+                      padx=(0 if column == 0 else 14, 0 if column == 1 else 14), ipady=10)
 
-        join_card = tk.Frame(
-            cards, bg="white", highlightbackground="#DCE4ED",
-            highlightthickness=1, padx=22, pady=25,
+            badge_frame = tk.Frame(card, bg=accent, width=52, height=52)
+            badge_frame.pack(anchor="w")
+            badge_frame.pack_propagate(False)
+            tk.Label(badge_frame, text=badge, bg=accent, fg="#FFFFFF",
+                     font=("Segoe UI", 20, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+
+            tk.Label(card, text=title, font=("Segoe UI", 16, "bold"),
+                     fg=p["text"], bg=p["surface"]).pack(anchor="w", pady=(16, 2))
+            tk.Label(card, text=subtitle, font=("Segoe UI", 10),
+                     fg=accent, bg=p["surface"]).pack(anchor="w", pady=(0, 12))
+            tk.Label(card, text=description, font=("Segoe UI", 10),
+                     fg=p["muted"], bg=p["surface"], justify=tk.LEFT,
+                     wraplength=330).pack(anchor="w", pady=(0, 18))
+
+            ttk.Button(card, text=primary_text, style="Accent.TButton",
+                       command=primary_cmd).pack(fill=tk.X, ipady=4)
+            if secondary_text is not None:
+                ttk.Button(card, text=secondary_text, command=secondary_cmd).pack(
+                    fill=tk.X, ipady=4, pady=(8, 0)
+                )
+            return card
+
+        make_card(
+            cards, 0, "Create Server", "Create New Workspace", p["green"], "＋",
+            "Tạo Workspace mới cho công ty.\nThiết lập thông tin tổ chức và tài khoản SUPER_ADMIN đầu tiên.",
+            "CREATE SERVER", self._open_create_server,
+            "LOGIN TO SAVED WORKSPACE", self._open_saved_workspace_login,
         )
-        join_card.grid(row=0, column=1, sticky="nsew", padx=(12, 0), ipady=15)
-        tk.Label(join_card, text="⇄", font=("Segoe UI", 35, "bold"),
-                 fg="#3985D6", bg="white").pack(pady=(5, 10))
-        tk.Label(join_card, text="Join Server", font=("Segoe UI", 17, "bold"),
-                 fg=text_color, bg="white").pack()
-        tk.Label(join_card, text="Connect Existing Workspace", font=("Segoe UI", 10),
-                 fg="#3985D6", bg="white").pack(pady=(4, 12))
-        tk.Label(
-            join_card,
-            text="Kết nối tới Server của công ty.\nSử dụng địa chỉ Server và tài khoản\nđược Admin hoặc HR cấp.",
-            font=("Segoe UI", 10), fg=muted, bg="white", justify=tk.CENTER,
-        ).pack(pady=(0, 22))
-        ttk.Button(join_card, text="JOIN SERVER",
-                   command=self._open_join_server).pack(fill=tk.X, ipady=7)
+        make_card(
+            cards, 1, "Join Server", "Connect Existing Workspace", p["blue"], "⇄",
+            "Kết nối tới Server của công ty.\nSử dụng địa chỉ Server và tài khoản được Admin hoặc HR cấp.",
+            "JOIN SERVER", self._open_join_server,
+        )
 
         tk.Label(
             main, text="Enterprise File Manager  |  Version 1.0",
-            font=("Segoe UI", 9), fg=muted, bg=bg_color,
-        ).pack(pady=(0, 15))
+            font=("Segoe UI", 9), fg=p["muted"], bg=p["background"],
+        ).pack(pady=(0, 12))
 
     def _open_create_server(self):
         self._build_create_workspace_ui()
@@ -551,10 +563,11 @@ class TFTPApp(tk.Tk):
         self.geometry("1000x720")
         self.minsize(850, 650)
 
-        bg = "#F3F6FA"
-        primary = "#1E3A5F"
-        text_color = "#243447"
-        muted = "#718096"
+        p = self.palette
+        bg = p["background"]
+        primary = p["navy"]
+        text_color = p["text"]
+        muted = p["muted"]
         self.configure(bg=bg)
 
         self.workspace_name_var = tk.StringVar()
@@ -568,7 +581,7 @@ class TFTPApp(tk.Tk):
         main = tk.Frame(self, bg=bg)
         main.pack(fill=tk.BOTH, expand=True)
 
-        header = tk.Frame(main, bg=primary, height=145)
+        header = tk.Frame(main, bg=primary, height=124)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         tk.Label(
@@ -577,11 +590,11 @@ class TFTPApp(tk.Tk):
         ).pack(anchor="w", padx=65, pady=(32, 5))
         tk.Label(
             header, text="Thiết lập không gian làm việc cho tổ chức của bạn",
-            font=("Segoe UI", 10), fg="#C8D6E5", bg=primary,
+            font=("Segoe UI", 10), fg="#C4D3E8", bg=primary,
         ).pack(anchor="w", padx=67)
 
         content = tk.Frame(main, bg=bg)
-        content.pack(fill=tk.BOTH, expand=True, padx=65, pady=25)
+        content.pack(fill=tk.BOTH, expand=True, padx=50, pady=20)
         tk.Label(
             content, text="Workspace Information",
             font=("Segoe UI", 17, "bold"), fg=text_color, bg=bg,
@@ -592,7 +605,7 @@ class TFTPApp(tk.Tk):
         ).pack(anchor="w", pady=(0, 15))
 
         form = tk.Frame(
-            content, bg="white", highlightbackground="#DCE4ED",
+            content, bg=p["surface"], highlightbackground=p["border"],
             highlightthickness=1, padx=25, pady=20,
         )
         form.pack(fill=tk.BOTH, expand=True)
@@ -601,7 +614,7 @@ class TFTPApp(tk.Tk):
         def add_field(row, label, variable, hint=None, readonly=False):
             tk.Label(
                 form, text=label, font=("Segoe UI", 10, "bold"),
-                fg=text_color, bg="white",
+                fg=text_color, bg=p["surface"],
             ).grid(row=row, column=0, sticky="w", padx=(0, 20), pady=10)
             entry = ttk.Entry(form, textvariable=variable, font=("Segoe UI", 10))
             entry.grid(row=row, column=1, sticky="ew", pady=10, ipady=5)
@@ -609,7 +622,7 @@ class TFTPApp(tk.Tk):
                 entry.configure(state="readonly")
             if hint:
                 tk.Label(
-                    form, text=hint, font=("Segoe UI", 8), fg=muted, bg="white",
+                    form, text=hint, font=("Segoe UI", 8), fg=muted, bg=p["surface"],
                 ).grid(row=row + 1, column=1, sticky="w", pady=(0, 5))
             return entry
 
@@ -622,19 +635,22 @@ class TFTPApp(tk.Tk):
 
         tk.Label(
             form, text="Description", font=("Segoe UI", 10, "bold"),
-            fg=text_color, bg="white",
+            fg=text_color, bg=p["surface"],
         ).grid(row=6, column=0, sticky="nw", padx=(0, 20), pady=10)
         self.workspace_description_text = tk.Text(
             form, height=3, font=("Segoe UI", 10),
-            relief=tk.SOLID, borderwidth=1, wrap=tk.WORD,
+            bg=p["surface"], fg=p["text"], relief=tk.FLAT, borderwidth=0,
+            highlightthickness=1, highlightbackground=p["border_strong"],
+            highlightcolor=p["blue"], insertbackground=p["text"],
+            wrap=tk.WORD, padx=8, pady=6,
         )
         self.workspace_description_text.grid(row=6, column=1, sticky="ew", pady=10)
 
         tk.Label(
             form, text="Storage Location *", font=("Segoe UI", 10, "bold"),
-            fg=text_color, bg="white",
+            fg=text_color, bg=p["surface"],
         ).grid(row=7, column=0, sticky="w", padx=(0, 20), pady=10)
-        storage_frame = tk.Frame(form, bg="white")
+        storage_frame = tk.Frame(form, bg=p["surface"])
         storage_frame.grid(row=7, column=1, sticky="ew", pady=10)
         storage_frame.columnconfigure(0, weight=1)
         ttk.Entry(storage_frame, textvariable=self.workspace_storage_var).grid(
@@ -655,7 +671,7 @@ class TFTPApp(tk.Tk):
         ttk.Button(footer, text="BACK", command=self._build_welcome_ui).pack(
             side=tk.LEFT, ipadx=20, ipady=6
         )
-        ttk.Button(footer, text="NEXT", command=self._workspace_next).pack(
+        ttk.Button(footer, text="NEXT", style="Accent.TButton", command=self._workspace_next).pack(
             side=tk.RIGHT, ipadx=30, ipady=6
         )
 
@@ -709,10 +725,9 @@ class TFTPApp(tk.Tk):
         self.geometry("1000x680")
         self.minsize(850, 600)
 
-        bg = "#F3F6FA"
-        primary = "#1E3A5F"
-        text_color = "#243447"
-        muted = "#718096"
+        p = self.palette
+        bg = p["background"]
+        primary = p["navy"]
         self.configure(bg=bg)
 
         self.admin_username_var = tk.StringVar(value="admin")
@@ -723,7 +738,7 @@ class TFTPApp(tk.Tk):
         main = tk.Frame(self, bg=bg)
         main.pack(fill=tk.BOTH, expand=True)
 
-        header = tk.Frame(main, bg=primary, height=130)
+        header = tk.Frame(main, bg=primary, height=118)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         tk.Label(
@@ -732,14 +747,14 @@ class TFTPApp(tk.Tk):
         ).pack(anchor="w", padx=65, pady=(28, 4))
         tk.Label(
             header, text="Tạo tài khoản SUPER_ADMIN cho Workspace",
-            font=("Segoe UI", 10), fg="#C8D6E5", bg=primary,
+            font=("Segoe UI", 10), fg="#C4D3E8", bg=primary,
         ).pack(anchor="w", padx=67)
 
         content = tk.Frame(main, bg=bg)
-        content.pack(fill=tk.BOTH, expand=True, padx=65, pady=25)
+        content.pack(fill=tk.BOTH, expand=True, padx=50, pady=20)
 
         form = tk.Frame(
-            content, bg="white", highlightbackground="#DCE4ED",
+            content, bg=p["surface"], highlightbackground=p["border"],
             highlightthickness=1, padx=30, pady=25,
         )
         form.pack(fill=tk.BOTH, expand=True)
@@ -748,7 +763,7 @@ class TFTPApp(tk.Tk):
         def add_row(row, label, variable, show=None):
             tk.Label(
                 form, text=label, font=("Segoe UI", 10, "bold"),
-                fg=text_color, bg="white",
+                fg=p["text"], bg=p["surface"],
             ).grid(row=row, column=0, sticky="w", padx=(0, 20), pady=12)
             entry = ttk.Entry(form, textvariable=variable, font=("Segoe UI", 10), show=show)
             entry.grid(row=row, column=1, sticky="ew", pady=12, ipady=5)
@@ -761,16 +776,16 @@ class TFTPApp(tk.Tk):
 
         tk.Label(
             content, text="* Bắt buộc. Tài khoản này sẽ có quyền SUPER_ADMIN.",
-            font=("Segoe UI", 9), fg=muted, bg=bg,
+            font=("Segoe UI", 9), fg=p["muted"], bg=p["background"],
         ).pack(anchor="w", pady=(10, 0))
 
-        footer = tk.Frame(main, bg=bg)
+        footer = tk.Frame(main, bg=p["background"])
         footer.pack(fill=tk.X, padx=65, pady=(0, 20))
         ttk.Button(
             footer, text="BACK", command=self._build_create_workspace_ui
         ).pack(side=tk.LEFT, ipadx=20, ipady=6)
         ttk.Button(
-            footer, text="CREATE WORKSPACE", command=self._finish_create_workspace
+            footer, text="CREATE WORKSPACE", style="Accent.TButton", command=self._finish_create_workspace
         ).pack(side=tk.RIGHT, ipadx=20, ipady=6)
 
     def _finish_create_workspace(self):
@@ -881,36 +896,33 @@ class TFTPApp(tk.Tk):
         self.geometry("1000x680")
         self.minsize(850, 600)
 
-        bg = "#F3F6FA"
-        primary = "#1E3A5F"
-        text_color = "#243447"
-        muted = "#718096"
-        self.configure(bg=bg)
+        p = self.palette
+        self.configure(bg=p["background"])
 
         self.login_server_var = tk.StringVar(value=self.admin_url_var.get())
         self.login_user_var = tk.StringVar()
         self.login_pass_var = tk.StringVar()
 
-        main = tk.Frame(self, bg=bg)
+        main = tk.Frame(self, bg=p["background"])
         main.pack(fill=tk.BOTH, expand=True)
 
-        header = tk.Frame(main, bg=primary, height=130)
+        header = tk.Frame(main, bg=p["navy"], height=118)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         tk.Label(
             header, text="JOIN SERVER",
-            font=("Segoe UI", 22, "bold"), fg="white", bg=primary,
-        ).pack(anchor="w", padx=65, pady=(28, 4))
+            font=("Segoe UI", 20, "bold"), fg="white", bg=p["navy"],
+        ).pack(anchor="w", padx=30, pady=(24, 4))
         tk.Label(
             header, text="Đăng nhập vào Workspace đã tồn tại",
-            font=("Segoe UI", 10), fg="#C8D6E5", bg=primary,
-        ).pack(anchor="w", padx=67)
+            font=("Segoe UI", 10), fg="#C4D3E8", bg=p["navy"],
+        ).pack(anchor="w", padx=30)
 
-        content = tk.Frame(main, bg=bg)
-        content.pack(fill=tk.BOTH, expand=True, padx=65, pady=30)
+        content = tk.Frame(main, bg=p["background"])
+        content.pack(fill=tk.BOTH, expand=True, padx=50, pady=24)
 
         form = tk.Frame(
-            content, bg="white", highlightbackground="#DCE4ED",
+            content, bg=p["surface"], highlightbackground=p["border"],
             highlightthickness=1, padx=30, pady=25,
         )
         form.pack(fill=tk.BOTH, expand=True)
@@ -919,7 +931,7 @@ class TFTPApp(tk.Tk):
         def add_row(row, label, variable, show=None):
             tk.Label(
                 form, text=label, font=("Segoe UI", 10, "bold"),
-                fg=text_color, bg="white",
+                fg=p["text"], bg=p["surface"],
             ).grid(row=row, column=0, sticky="w", padx=(0, 20), pady=12)
             entry = ttk.Entry(form, textvariable=variable, font=("Segoe UI", 10), show=show)
             entry.grid(row=row, column=1, sticky="ew", pady=12, ipady=5)
@@ -932,15 +944,15 @@ class TFTPApp(tk.Tk):
         tk.Label(
             content,
             text="* Nhập địa chỉ Server (ví dụ: http://127.0.0.1:6971) và tài khoản được cấp.",
-            font=("Segoe UI", 9), fg=muted, bg=bg,
+            font=("Segoe UI", 9), fg=p["muted"], bg=p["background"],
         ).pack(anchor="w", pady=(10, 0))
 
-        footer = tk.Frame(main, bg=bg)
+        footer = tk.Frame(main, bg=p["background"])
         footer.pack(fill=tk.X, padx=65, pady=(0, 20))
         ttk.Button(footer, text="BACK", command=self._build_welcome_ui).pack(
             side=tk.LEFT, ipadx=20, ipady=6
         )
-        self.join_login_btn = ttk.Button(footer, text="LOGIN", command=self._do_login)
+        self.join_login_btn = ttk.Button(footer, text="LOGIN", style="Accent.TButton", command=self._do_login)
         self.join_login_btn.pack(side=tk.RIGHT, ipadx=30, ipady=6)
         self.login_status_var = tk.StringVar(value="Sẵn sàng đăng nhập")
         ttk.Label(footer, textvariable=self.login_status_var).pack(side=tk.RIGHT, padx=12)
@@ -993,17 +1005,19 @@ class TFTPApp(tk.Tk):
         self.configure(bg=self.palette["background"])
 
         # Header thương hiệu: chỉ bổ sung phần trình bày, không can thiệp các tab.
-        header = tk.Frame(self, bg=self.palette["navy"], height=76)
+        header = tk.Frame(self, bg=self.palette["navy"], height=72)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         brand = tk.Frame(header, bg=self.palette["navy"])
-        brand.pack(side=tk.LEFT, fill=tk.Y, padx=22, pady=12)
+        brand.pack(side=tk.LEFT, fill=tk.Y, padx=24, pady=12)
         tk.Label(brand, text="TFTP PRO", bg=self.palette["navy"], fg="#FFFFFF",
                  font=("Segoe UI", 18, "bold")).pack(anchor="w")
         tk.Label(brand, text="ENTERPRISE FILE MANAGEMENT", bg=self.palette["navy"],
-                 fg="#B9C9DF", font=("Segoe UI", 8, "bold")).pack(anchor="w", pady=(1, 0))
+                 fg="#C4D3E8", font=("Segoe UI", 8, "bold")).pack(anchor="w", pady=(2, 0))
         tk.Label(header, text="TRANSFER  •  MONITOR  •  MANAGE", bg=self.palette["navy"],
-                 fg="#D3DEEC", font=("Segoe UI", 9)).pack(side=tk.RIGHT, padx=24)
+                 fg="#DCE6F5", font=("Segoe UI", 9)).pack(side=tk.RIGHT, padx=24)
+        accent_line = tk.Frame(self, bg=self.palette["blue"], height=3)
+        accent_line.pack(fill=tk.X)
 
         top = ttk.Frame(self, padding=(16, 12, 16, 8))
         top.pack(fill=tk.X)
@@ -1157,7 +1171,13 @@ class TFTPApp(tk.Tk):
 
         log_frame = ttk.LabelFrame(tab, text="Nhật ký", padding=8)
         log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        self.log_text = tk.Text(log_frame, font=("Consolas", 10), height=12)
+        self.log_text = tk.Text(
+            log_frame, font=("Consolas", 10), height=12,
+            bg=self.palette["surface"], fg=self.palette["text"],
+            relief=tk.FLAT, borderwidth=0, highlightthickness=1,
+            highlightbackground=self.palette["border"], highlightcolor=self.palette["blue"],
+            insertbackground=self.palette["text"], padx=8, pady=8,
+        )
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
@@ -1235,7 +1255,7 @@ class TFTPApp(tk.Tk):
             tab, tuple(columns), tuple(headings), tuple(widths), height=15
         )
         tree_frame.grid(row=2, column=0, sticky="nsew")
-        self.fm_tree.tag_configure("dir", foreground="#0a6b3a")
+        self.fm_tree.tag_configure("dir", foreground=self.palette["green"])
         self.fm_tree.bind("<Double-1>", lambda _event: self._fm_enter_selected())
 
         action_bar = ttk.Frame(tab)

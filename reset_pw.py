@@ -4,7 +4,7 @@ from pathlib import Path
 from auth import AuthManager
 
 DB = "tftp_admin.db"
-NEW_PASSWORD = "MatKhauManh123!"
+NEW_PASSWORD = "Admin123@"
 
 if not Path(DB).exists():
     print(f"Not found {DB} in current directory: {Path.cwd()}")
