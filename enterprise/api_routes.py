@@ -40,13 +40,69 @@ def handle(handler, svc, method: str, path: str, query: dict) -> bool:
         send(200, {"status": "logged_out"})
     elif sub == "/me" and method == "GET":
         send(200, {**user, "permissions": _perms(svc, user["role"])})
+    elif sub == "/roles" and method == "GET":
+        send(200, {"roles": svc.roles.list_roles()})
     elif sub == "/users" and method == "GET":
         svc.permissions.require(user, "users.manage")
         send(200, {"users": svc.accounts.list_users()})
     elif sub == "/users" and method == "POST":
+        svc.permissions.require(user, "users.manage")
         b = handler._json_body()
-        send(201, svc.create_user(user, str(b.get("username", "")), str(b.get("password", "")),
-                                  str(b.get("role", "EMPLOYEE"))))
+        role = str(b.get("role", "EMPLOYEE")).upper()
+        created = svc.create_user(
+            user,
+            str(b.get("username", "")),
+            str(b.get("password", "")),
+            role,
+        )
+        profile = None
+        if str(b.get("full_name", "")).strip():
+            svc.permissions.require(user, "employees.manage")
+            profile = svc.employees.create(
+                str(b.get("full_name", "")).strip(),
+                username=created["username"],
+                email=b.get("email") or None,
+                department_id=b.get("department_id") or None,
+                position_id=b.get("position_id") or None,
+                manager_id=b.get("manager_id") or None,
+            )
+            svc.audit.log(
+                user["username"], "employee.create", created["username"],
+                str(profile.get("full_name", "")),
+            )
+        send(201, {**created, "profile": profile})
+    elif sub == "/users/active" and method == "POST":
+        svc.permissions.require(user, "users.manage")
+        b = handler._json_body()
+        target = str(b.get("username", ""))
+        active = bool(b.get("active", True))
+        if target == user["username"] and not active:
+            raise EnterpriseError("Không thể tự khóa tài khoản đang đăng nhập", 409)
+        svc.accounts.set_active(target, active)
+        svc.audit.log(user["username"], "user.active", target, "active" if active else "locked")
+        send(200, {"username": target, "active": active})
+    elif sub == "/users/password" and method == "POST":
+        b = handler._json_body()
+        target = str(b.get("username") or user["username"])
+        new_password = str(b.get("new_password", ""))
+        if target != user["username"]:
+            svc.permissions.require(user, "users.manage")
+        elif not svc.permissions.has(user["role"], "users.manage"):
+            if not svc.accounts.verify_password(user["username"], str(b.get("current_password", ""))):
+                raise EnterpriseError("Mật khẩu hiện tại không đúng", 403)
+        svc.accounts.change_password(target, new_password)
+        svc.audit.log(user["username"], "user.password", target)
+        send(200, {"status": "ok", "username": target})
+    elif sub == "/users" and method == "DELETE":
+        svc.permissions.require(user, "users.manage")
+        target = str((query.get("username") or [""])[0]).strip()
+        if not target:
+            raise EnterpriseError("Thiếu username", 400)
+        if target == user["username"]:
+            raise EnterpriseError("Không thể xóa tài khoản đang đăng nhập", 409)
+        svc.accounts.delete_user(target)
+        svc.audit.log(user["username"], "user.delete", target)
+        send(200, {"status": "deleted", "username": target})
     elif sub == "/users/role" and method == "POST":
         b = handler._json_body()
         svc.set_role(user, str(b.get("username", "")), str(b.get("role", "")))
@@ -101,14 +157,40 @@ def handle(handler, svc, method: str, path: str, query: dict) -> bool:
         send(201, {"code": code})
     elif sub == "/employees" and method == "GET":
         svc.permissions.require(user, "employees.read")
-        send(200, {"employees": svc.employees.list()})
+        dept = (query.get("department_id") or [""])[0]
+        send(200, {"employees": svc.employees.list(
+            department_id=int(dept) if dept else None)})
     elif sub == "/employees" and method == "POST":
         svc.permissions.require(user, "employees.manage")
         b = handler._json_body()
         send(201, svc.employees.create(
             str(b.get("full_name", "")),
-            **{k: b.get(k) for k in ("username", "email", "department_id", "position_id",
-                                      "manager_id")}))
+            username=b.get("username") or None,
+            email=b.get("email") or None,
+            department_id=b.get("department_id") or None,
+            position_id=b.get("position_id") or None,
+            manager_id=b.get("manager_id") or None,
+        ))
+    elif sub == "/employees/update" and method == "POST":
+        svc.permissions.require(user, "employees.manage")
+        b = handler._json_body()
+        fields = {k: (b.get(k) or None) for k in
+                  ("full_name", "email", "department_id", "position_id", "manager_id")}
+        if str(b.get("full_name", "")).strip():
+            fields["full_name"] = str(b["full_name"]).strip()
+        else:
+            fields.pop("full_name", None)
+        employee = svc.employees.update(int(b.get("id", 0)), **fields)
+        svc.audit.log(user["username"], "employee.update", str(employee.get("id")),
+                      str(employee.get("full_name", "")))
+        send(200, employee)
+    elif sub == "/employees/delete" and method == "POST":
+        svc.permissions.require(user, "employees.manage")
+        b = handler._json_body()
+        emp_id = int(b.get("id", 0))
+        svc.employees.delete(emp_id)
+        svc.audit.log(user["username"], "employee.delete", str(emp_id))
+        send(200, {"status": "deleted", "id": emp_id})
     elif sub == "/departments" and method in ("GET", "POST"):
         if method == "GET":
             svc.permissions.require(user, "employees.read")
@@ -117,6 +199,24 @@ def handle(handler, svc, method: str, path: str, query: dict) -> bool:
             svc.permissions.require(user, "employees.manage")
             b = handler._json_body()
             send(201, svc.departments.create(str(b.get("name", "")), str(b.get("description", ""))))
+    elif sub == "/departments/delete" and method == "POST":
+        svc.permissions.require(user, "employees.manage")
+        b = handler._json_body()
+        svc.departments.delete(int(b.get("id", 0)))
+        send(200, {"status": "deleted"})
+    elif sub == "/positions" and method in ("GET", "POST"):
+        if method == "GET":
+            svc.permissions.require(user, "employees.read")
+            send(200, {"positions": svc.positions.list()})
+        else:
+            svc.permissions.require(user, "employees.manage")
+            b = handler._json_body()
+            send(201, svc.positions.create(str(b.get("name", "")), str(b.get("description", ""))))
+    elif sub == "/positions/delete" and method == "POST":
+        svc.permissions.require(user, "employees.manage")
+        b = handler._json_body()
+        svc.positions.delete(int(b.get("id", 0)))
+        send(200, {"status": "deleted"})
     elif sub == "/tasks" and method == "GET":
         send(200, {"tasks": svc.tasks.list_for(user["username"])})
     elif sub == "/tasks" and method == "POST":

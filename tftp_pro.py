@@ -62,6 +62,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--metrics-db", default=None)
     parser.add_argument("--pxe-profiles", default=DEFAULT_PXE_PROFILES)
     parser.add_argument(
+        "--enterprise-db",
+        default=None,
+        help="Bật Workspace Enterprise (roles/nhân viên/ACL) với database SQLite này",
+    )
+    parser.add_argument(
+        "--enterprise-root",
+        default="storage/company_files",
+        help="Thư mục lưu file của Workspace Enterprise",
+    )
+    parser.add_argument(
         "--no-admin",
         action="store_true",
         help="Chỉ chạy TFTP Server, không mở Admin API",
@@ -119,12 +129,40 @@ def main(argv=None) -> int:
                 "hãy đổi mật khẩu trước khi dùng trong LAN.",
                 created[0],
             )
+        enterprise = None
+        if args.enterprise_db:
+            from enterprise.service import EnterpriseService
+
+            Path(args.enterprise_root).mkdir(parents=True, exist_ok=True)
+            enterprise = EnterpriseService(args.enterprise_db, args.enterprise_root)
+            if not enterprise.accounts.list_users():
+                super_user = (os.environ.get("TFTP_SUPER_ADMIN_USER") or "admin").strip()
+                super_pass = (
+                    os.environ.get("TFTP_SUPER_ADMIN_PASSWORD")
+                    or os.environ.get("TFTP_ADMIN_PASSWORD")
+                )
+                if super_pass:
+                    try:
+                        enterprise.accounts.create_super_admin(super_user, super_pass)
+                        logger.warning(
+                            "Đã tạo SUPER_ADMIN '%s' cho Workspace Enterprise. "
+                            "Mật khẩu lấy từ TFTP_SUPER_ADMIN_PASSWORD/TFTP_ADMIN_PASSWORD.",
+                            super_user,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Không tạo được SUPER_ADMIN: %s", exc)
+                else:
+                    logger.warning(
+                        "Workspace Enterprise chưa có tài khoản. Đặt "
+                        "TFTP_SUPER_ADMIN_PASSWORD (tối thiểu 8 ký tự) rồi chạy lại."
+                    )
         api = AdminAPIServer(
             server.storage,
             auth,
             metrics=metrics,
             tracer=tracer,
             pxe=pxe,
+            enterprise=enterprise,
             host=args.admin_host,
             port=args.admin_port,
         )

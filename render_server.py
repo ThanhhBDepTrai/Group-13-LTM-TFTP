@@ -15,13 +15,25 @@ from urllib.parse import urlsplit
 PORT = int(os.environ.get("PORT", "10000"))
 ROOT = Path(__file__).resolve().parent
 WEB_DIR = ROOT / "web"
+WORKSPACE_DIR = Path(
+    os.environ.get("EFM_WORKSPACE_DIR") or (ROOT / "web_workspace")
+)
+ENTERPRISE_DB = WORKSPACE_DIR / "efm.db"
+ENTERPRISE_ROOT = WORKSPACE_DIR / "files"
 
 
 def _start_backend() -> subprocess.Popen:
     env = os.environ.copy()
     if "TFTP_ADMIN_PASSWORD" not in env:
         env["TFTP_ADMIN_PASSWORD"] = "ChangeMe123!"
-    cmd = [sys.executable, str(ROOT / "tftp_pro.py")]
+    cmd = [
+        sys.executable,
+        str(ROOT / "tftp_pro.py"),
+        "--enterprise-db",
+        str(ENTERPRISE_DB),
+        "--enterprise-root",
+        str(ENTERPRISE_ROOT),
+    ]
     proc = subprocess.Popen(
         cmd,
         cwd=str(ROOT),

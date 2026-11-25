@@ -183,6 +183,20 @@ curl -s -X POST http://127.0.0.1:6971/api/auth/login \
 Token có hiệu lực 8 giờ. Gọi `POST /api/auth/logout` để thu hồi token hiện tại.
 Chi tiết endpoint và quyền: [docs/admin_api.md](docs/admin_api.md).
 
+Tài khoản `admin` legacy chỉ được tạo tự động khi database chưa có người dùng nào;
+`TFTP_ADMIN_PASSWORD` **không** ghi đè mật khẩu đã lưu. Nếu quên mật khẩu hoặc
+muốn đổi sang mật khẩu khác, đặt lại trực tiếp trong database (dừng server trước
+nếu muốn chắc chắn, nhưng không bắt buộc):
+
+```powershell
+python scripts/set_admin_password.py --db tftp_admin.db
+# hoặc không tương tác:
+python scripts/set_admin_password.py --db tftp_admin.db --password "<MAT_KHAU_MOI>"
+```
+
+Muốn tạo lại database từ đầu (mất người dùng, token và lịch sử): xóa
+`tftp_admin.db` rồi chạy lại server với `TFTP_ADMIN_PASSWORD` đã đặt.
+
 ## 6. Giao diện GUI
 
 Thanh trên cùng cấu hình TFTP IP, Port, Window và Admin API URL/tài khoản.
@@ -206,6 +220,28 @@ mục được admin cấp trong File Manager. Nhiều phiên đăng nhập Gues
 động đồng thời. Giới hạn này được thực thi trên Admin API; giao thức TFTP thuần
 không có xác thực, vì vậy không dùng TFTP để phục vụ Guest hoặc mở các cổng dịch
 vụ ra Internet.
+
+### Web console (trình duyệt)
+
+Ngoài GUI Tkinter, dự án còn có web console một file tại `web/index.html`, dùng
+chung Admin API với GUI. `render_server.py` khởi động backend TFTP Pro rồi phục
+vụ trang này và proxy `/api/*` qua cùng một cổng:
+
+```powershell
+$env:TFTP_ADMIN_PASSWORD = "<MAT_KHAU_MANH>"
+$env:PORT = "10000"   # tùy chọn, mặc định 10000
+python render_server.py
+```
+
+Mở `http://127.0.0.1:10000` và đăng nhập bằng tài khoản legacy (`admin` cùng mật
+khẩu `TFTP_ADMIN_PASSWORD`). Nếu chạy trên Render hoặc máy khác, dùng địa chỉ mà
+nền tảng cấp; để truy cập từ LAN cần cấu hình mạng/firewall tương ứng.
+
+Web console hỗ trợ dashboard, File Manager, truyền file HTTP, Packet Analyzer,
+người dùng, nhân viên, PXE, phiên bản, quota và simulator; giao diện responsive
+(sidebar thu gọn, drawer trên điện thoại), tự theo dark mode của hệ điều hành,
+có skeleton khi tải, modal xác nhận và toast. Trang không dùng CDN/thư viện
+ngoài nên chạy được offline trong mạng lab.
 
 ## 7. CLI
 

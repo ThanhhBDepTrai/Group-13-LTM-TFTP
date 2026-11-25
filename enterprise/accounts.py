@@ -95,6 +95,30 @@ class AccountManager:
                 raise EnterpriseError("Không tìm thấy người dùng", 404)
             c.execute("DELETE FROM sessions WHERE username=?", (username,))
 
+    def verify_password(self, username: str, password: str) -> bool:
+        with self.db.connect() as c:
+            row = c.execute("SELECT password_hash, salt FROM ent_users WHERE username=?",
+                            (username,)).fetchone()
+        if row is None:
+            return False
+        return hmac.compare_digest(
+            _hash_password(str(password), bytes.fromhex(row["salt"])),
+            row["password_hash"],
+        )
+
+    def delete_user(self, username: str) -> None:
+        with self.db.connect() as c:
+            row = c.execute("SELECT role FROM ent_users WHERE username=?", (username,)).fetchone()
+            if row is None:
+                raise EnterpriseError("Không tìm thấy người dùng", 404)
+            if row["role"] == "SUPER_ADMIN":
+                n = c.execute("SELECT COUNT(*) FROM ent_users WHERE role='SUPER_ADMIN'").fetchone()[0]
+                if n <= 1:
+                    raise EnterpriseError("Không thể xóa SUPER_ADMIN cuối cùng", 409)
+            c.execute("DELETE FROM sessions WHERE username=?", (username,))
+            c.execute("DELETE FROM employees WHERE username=?", (username,))
+            c.execute("DELETE FROM ent_users WHERE username=?", (username,))
+
     # --- đăng nhập / phiên -------------------------------------------------
     def login(self, username: str, password: str, client_ip: str | None = None) -> dict:
         username = str(username).strip()
