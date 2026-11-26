@@ -36,3 +36,44 @@ class _NamedTable:
 
 class DepartmentManager(_NamedTable):
     table, label = "departments", "Phòng ban"
+
+    def update(
+        self,
+        item_id: int,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        quota_bytes: int | None = None,
+    ) -> dict:
+        fields: list[str] = []
+        args: list = []
+        if name is not None:
+            name = str(name).strip()
+            if not name:
+                raise EnterpriseError("Tên phòng ban không được trống")
+            fields.append("name=?")
+            args.append(name)
+        if description is not None:
+            fields.append("description=?")
+            args.append(str(description))
+        if quota_bytes is not None:
+            try:
+                quota = int(quota_bytes)
+            except (TypeError, ValueError) as exc:
+                raise EnterpriseError("quota_bytes phải là số nguyên") from exc
+            if quota <= 0:
+                raise EnterpriseError("quota_bytes phải lớn hơn 0")
+            fields.append("quota_bytes=?")
+            args.append(quota)
+        if not fields:
+            raise EnterpriseError("Không có trường nào để cập nhật")
+        args.append(int(item_id))
+        with self.db.connect() as c:
+            changed = c.execute(
+                f"UPDATE {self.table} SET {', '.join(fields)} WHERE id=?", args
+            ).rowcount
+            if changed == 0:
+                raise EnterpriseError(f"Không tìm thấy {self.label}", 404)
+            return dict(
+                c.execute(f"SELECT * FROM {self.table} WHERE id=?", (int(item_id),)).fetchone()
+            )

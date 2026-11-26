@@ -199,6 +199,24 @@ def handle(handler, svc, method: str, path: str, query: dict) -> bool:
             svc.permissions.require(user, "employees.manage")
             b = handler._json_body()
             send(201, svc.departments.create(str(b.get("name", "")), str(b.get("description", ""))))
+    elif sub == "/departments/update" and method == "POST":
+        svc.permissions.require(user, "employees.manage")
+        b = handler._json_body()
+        fields = {}
+        if b.get("name") is not None:
+            fields["name"] = str(b.get("name"))
+        if b.get("description") is not None:
+            fields["description"] = str(b.get("description"))
+        if b.get("quota_bytes") is not None:
+            fields["quota_bytes"] = int(b.get("quota_bytes"))
+        if not fields:
+            raise EnterpriseError("Không có trường nào để cập nhật", 400)
+        updated = svc.departments.update(int(b.get("id", 0)), **fields)
+        svc.audit.log(
+            user["username"], "department.update", str(updated.get("id")),
+            ",".join(sorted(fields)),
+        )
+        send(200, updated)
     elif sub == "/departments/delete" and method == "POST":
         svc.permissions.require(user, "employees.manage")
         b = handler._json_body()

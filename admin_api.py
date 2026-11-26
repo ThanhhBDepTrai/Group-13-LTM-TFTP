@@ -24,7 +24,7 @@ from enterprise import api_routes as enterprise_routes
 from enterprise.errors import EnterpriseError
 from metrics import MetricsCollector
 from network_simulator import NetworkFaultInjector
-from packet_trace import PacketTracer
+from packet_trace import PacketEvent, PacketTracer
 from pxe_config import PxeError, PxeManager
 from storage_manager import StorageError, StorageManager
 from tftp_config import (
@@ -177,6 +177,30 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         app = self.server.app
         if user is not None and user.get("role") == "GUEST":
             app.enterprise.acl.require(user, path, "read")
+
+    def _trace_http_transfer(
+        self,
+        filename: str,
+        opcode: str,
+        direction: str,
+        payload_length: int,
+    ) -> None:
+        """Ghi su kien HTTP vao Packet Analyzer de tab Packets co du lieu."""
+        tracer = getattr(self.server.app, "tracer", None)
+        if tracer is None:
+            return
+        now = time.time()
+        event = PacketEvent(
+            timestamp=time.strftime("%H:%M:%S", time.localtime(now))
+            + f".{int(now % 1 * 1000):03d}",
+            source=str(self.client_address[0]),
+            destination=f"server:{filename}" if filename else "server",
+            opcode=str(opcode).upper(),
+            block_number=None,
+            payload_length=max(int(payload_length or 0), 0),
+            direction=direction,
+        )
+        tracer.add(event)
 
     def _record_file_transfer(
         self,
@@ -368,6 +392,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
             self._record_file_transfer(
                 relative, "download", len(body), started
             )
+            self._trace_http_transfer(relative, "RRQ", "HTTP -> Client", len(body))
             self._send_bytes(
                 200,
                 body,
@@ -377,18 +402,23 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/files/upload" and method == "POST":
-            self._authenticate("files.upload")
+            _caller, token = self._authenticate("files.upload")
             relative = self._first(query, "path")
+            enterprise_user = self._enterprise_principal(token)
             body = self._read_body()
             started = time.monotonic()
             try:
                 entry = app.storage.write_bytes(relative, body, overwrite=True)
+                if enterprise_user is not None and relative:
+                    app.enterprise.register_upload(enterprise_user, relative)
             except Exception as exc:
                 self._record_file_transfer(
                     relative, "upload", 0, started, status="failed", error=str(exc)
                 )
+                self._trace_http_transfer(relative, "ERROR", "HTTP -> Server", 0)
                 raise
             self._record_file_transfer(relative, "upload", len(body), started)
+            self._trace_http_transfer(relative, "WRQ", "HTTP -> Server", len(body))
             self._send_json(201, {"entry": entry.to_dict(), "sha256": entry.sha256})
             return
 
@@ -427,10 +457,15 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/files" and method == "DELETE":
-            self._authenticate("files.delete")
+            _caller, token = self._authenticate("files.delete")
             relative = self._first(query, "path")
             recursive = self._first(query, "recursive", "0") in ("1", "true", "yes")
             app.storage.delete(relative, recursive=recursive)
+            if app.enterprise is not None and self._enterprise_principal(token) is not None:
+                try:
+                    app.enterprise.files.delete(relative)
+                except Exception:  # noqa: BLE001 - metadata co the khong ton tai
+                    pass
             self._send_json(200, {"status": "deleted", "path": relative})
             return
 
@@ -592,14 +627,36 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
                 eu = self._enterprise_principal(token)
                 if eu is not None:
                     perm = "files.download" if mode == "read" else "files.upload"
-                    self.enterprise.permissions.require(eu, perm)
+                    app.enterprise.permissions.require(eu, perm)
                     user = eu
             else:
                 perm = "files.download" if mode == "read" else "files.upload"
                 app.auth.require(user, perm)
             client_ip = str(self.client_address[0])
             ticket = app.transfer_tickets.issue(client_ip, str(filename), mode)
-            self._send_json(200, {"status": "authorized", "expires_at": ticket["expires_at"]})
+            self._send_json(
+                200,
+                {
+                    "status": "authorized",
+                    "client_ip": ticket["client_ip"],
+                    "filename": ticket["filename"],
+                    "mode": ticket["mode"],
+                    "expires_at": ticket["expires_at"],
+                    "ttl_seconds": getattr(app.transfer_tickets, "ttl", 30.0),
+                    "enforced": bool(getattr(self.server, "tickets_enforced", False)),
+                },
+            )
+            return
+
+        if path == "/api/v1/simulator/config" and method == "GET":
+            self._authenticate("stats.read")
+            self._send_json(
+                200,
+                {
+                    "loss_rate": app.fault_injector.loss_rate,
+                    "delay_ms": app.fault_injector.delay_ms,
+                },
+            )
             return
 
         if path == "/api/v1/simulator/config" and method == "POST":
@@ -679,6 +736,7 @@ class AdminAPIServer:
         transfer_tickets=None,
         ticket_manager=None,
         fault_injector=None,
+        tickets_enforced: bool = False,
     ):
         self.storage = storage
         self.auth = auth
@@ -690,6 +748,7 @@ class AdminAPIServer:
         self.transfer_tickets = transfer_tickets or ticket_manager or TransferTicketManager()
         self.ticket_manager = self.transfer_tickets
         self.fault_injector = fault_injector or NetworkFaultInjector()
+        self.tickets_enforced = bool(tickets_enforced)
         self.httpd = _AdminHTTPServer((host, port), _AdminRequestHandler, self)
         self.host, self.port = self.httpd.server_address[:2]
         self._thread: threading.Thread | None = None

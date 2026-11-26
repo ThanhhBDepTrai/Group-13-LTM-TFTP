@@ -104,9 +104,27 @@ class EnterpriseService:
         return user
 
     def set_role(self, actor, username, role) -> None:
-        self.permissions.require(actor, "roles.manage")
+        actor_role = str(actor.get("role", "")).upper()
+        # SUPER_ADMIN: toàn quyền. ADMIN: được đổi vai trò thấp hơn cấp mình
+        # (RoleManager.can_assign vẫn chặn gán ngang/cao hơn).
+        if actor_role == "SUPER_ADMIN":
+            pass
+        elif actor_role == "ADMIN":
+            if not self.permissions.has(actor_role, "users.manage"):
+                raise EnterpriseError("Không có quyền đổi vai trò", 403)
+        else:
+            raise EnterpriseError("Chỉ Admin mới được đổi vai trò", 403)
         self.roles.set_role(actor, username, role)
         self.audit.log(actor["username"], "user.set_role", username, f"role={role}")
+
+    def update_department(self, actor, department_id, **fields) -> dict:
+        self.permissions.require(actor, "employees.manage")
+        updated = self.departments.update(int(department_id), **fields)
+        self.audit.log(
+            actor["username"], "department.update", str(department_id),
+            ",".join(sorted(fields)),
+        )
+        return updated
 
     def create_join_code(self, actor, *, role="EMPLOYEE", ttl=24 * 3600, max_uses=1) -> str:
         self.permissions.require(actor, "server.manage")
@@ -193,13 +211,25 @@ class EnterpriseService:
                     "SELECT path FROM folders WHERE department_id=?", (int(department_id),)
                 )
             ]
+            owners = {
+                r["username"]
+                for r in c.execute(
+                    "SELECT u.username FROM ent_users u "
+                    "LEFT JOIN employees e ON e.username=u.username "
+                    "WHERE e.department_id=?",
+                    (int(department_id),),
+                )
+            }
             used = 0
-            for f in c.execute("SELECT path, size FROM files"):
+            for f in c.execute("SELECT path, size, owner FROM files"):
+                in_folder = False
                 for folder in folders:
                     base = folder.rstrip("/")
                     if f["path"] == folder or f["path"].startswith(base + "/"):
-                        used += int(f["size"] or 0)
+                        in_folder = True
                         break
+                if in_folder or (f["owner"] in owners):
+                    used += int(f["size"] or 0)
             percent = (used / quota * 100.0) if quota else 0.0
             return {
                 "used_bytes": used,

@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="color-scheme" content="light dark" />
-<title>TFTP PRO – Web Console</title>
+<title>TFTP PRO Web Console</title>
 <style>
   /* ============================================================
-     Design tokens — light first, dark via prefers-color-scheme
+     Design tokens: light first, dark via prefers-color-scheme
      ============================================================ */
   :root{
     color-scheme: light;
@@ -1111,9 +1111,14 @@
 
         <div class="card">
           <div class="toolbar">
-            <input id="verName" class="input" placeholder="Tên file (ví dụ: config.json)" style="flex:1;min-width:220px;" />
+            <select id="verName" class="input" aria-label="Chọn tệp" style="flex:1;min-width:220px;">
+              <option value="">— Chọn tệp —</option>
+            </select>
             <button id="loadVersionsBtn" class="btn btn-primary" type="button" onclick="loadVersions()">
               <svg class="icon icon-sm" aria-hidden="true"><use href="#i-search"></use></svg>Xem phiên bản
+            </button>
+            <button class="btn btn-secondary btn-icon" type="button" aria-label="Làm mới danh sách tệp" title="Làm mới danh sách tệp" onclick="loadVersionFileList()">
+              <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
             </button>
           </div>
 
@@ -1145,12 +1150,19 @@
 
         <div class="card">
           <div class="toolbar">
-            <input id="quotaDep" class="input" placeholder="ID phòng ban" style="flex:1;min-width:220px;" />
+            <select id="quotaDep" class="input" aria-label="Phòng ban" style="flex:1;min-width:220px;">
+              <option value="">— Chọn phòng ban —</option>
+            </select>
             <button id="loadQuotaBtn" class="btn btn-primary" type="button" onclick="loadQuota()">
               <svg class="icon icon-sm" aria-hidden="true"><use href="#i-search"></use></svg>Xem quota
             </button>
+            <input id="quotaLimit" class="input" type="number" min="1" step="1048576"
+                   placeholder="Hạn mức mới (bytes)" style="flex:1;min-width:180px;" />
+            <button id="saveQuotaBtn" class="btn btn-secondary" type="button" onclick="saveQuotaLimit()">
+              <svg class="icon icon-sm" aria-hidden="true"><use href="#i-check"></use></svg>Lưu hạn mức
+            </button>
           </div>
-          <div id="quotaResult" class="result-box"><span class="muted">Nhập ID phòng ban ở trên để xem hạn mức lưu trữ.</span></div>
+          <div id="quotaResult" class="result-box"><span class="muted">Chọn phòng ban ở trên để xem hạn mức lưu trữ.</span></div>
         </div>
       </section>
 
@@ -1179,7 +1191,11 @@
             <button id="simApplyBtn" class="btn btn-primary" type="button" onclick="setSimConfig()">
               <svg class="icon icon-sm" aria-hidden="true"><use href="#i-check"></use></svg>Áp dụng
             </button>
+            <button class="btn btn-secondary btn-icon" type="button" aria-label="Đọc cấu hình hiện tại" title="Đọc cấu hình hiện tại" onclick="loadSimConfig()">
+              <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
+            </button>
           </div>
+          <p id="simCurrent" class="hint" style="margin-top:8px;"></p>
         </div>
 
         <div class="card">
@@ -1194,6 +1210,11 @@
             </button>
           </div>
           <div id="simResult" class="result-box"></div>
+          <p class="hint" style="margin-top:10px;">
+            Vé được cấp theo cặp <strong>IP máy khách + tên tệp + chiều truyền</strong> và chỉ dùng 1 lần trong 30 giây.
+            Server chỉ bắt buộc vé khi chạy với <code>TFTP_REQUIRE_TICKETS=1</code>;
+            khi tắt, vé chỉ mang tính chất mô phỏng/kiểm thử.
+          </p>
         </div>
       </section>
 
@@ -1225,8 +1246,8 @@ const NAV_PERMS = {
   users: ['users.manage'],
   employee: ['employees.read'],
   pxe: ['pxe.read'],
-  versions: ['files.manage'],
-  quota: ['files.manage'],
+  versions: ['files.read'],
+  quota: ['employees.read'],
   sim: ['stats.read']
 };
 const LEGACY_ROLE_PERMS = {
@@ -1234,6 +1255,10 @@ const LEGACY_ROLE_PERMS = {
           'files.rename','files.mkdir','users.manage','stats.read','pxe.read','pxe.manage'],
   user: ['files.list','files.read','files.download','files.upload','stats.read','pxe.read'],
   guest: ['files.list','files.read','files.download','pxe.read']
+};
+const ROLE_LEVELS = {
+  SUPER_ADMIN: 100, ADMIN: 80, HR: 60, MANAGER: 60,
+  TEAM_LEADER: 40, EMPLOYEE: 20, INTERN: 10, GUEST: 5
 };
 const ROLE_LABELS = {
   SUPER_ADMIN: 'Toàn quyền hệ thống',
@@ -1790,6 +1815,9 @@ function showTab(name){
   else if (name === 'users') loadUsers();
   else if (name === 'employee') loadEmployees();
   else if (name === 'pxe') loadPxe();
+  else if (name === 'versions') loadVersionFileList();
+  else if (name === 'quota') loadQuotaDepartments();
+  else if (name === 'sim') loadSimConfig();
 }
 
 if (token) resumeSession();
@@ -2199,11 +2227,15 @@ async function loadRoles(){
 
 function assignableRoles(){
   if (!rolesCache.length) return [{ name: 'EMPLOYEE' }];
-  const actorRole = currentUser && currentUser.role;
-  if (!actorRole || actorRole === 'SUPER_ADMIN') return rolesCache;
-  const actor = rolesCache.filter(function(r){ return r.name === actorRole; })[0];
-  if (!actor) return rolesCache;
-  return rolesCache.filter(function(r){ return r.level < actor.level; });
+  const actorRole = String((currentUser && currentUser.role) || '').toUpperCase();
+  if (!actorRole) return rolesCache.filter(function(r){ return r.name === 'EMPLOYEE'; });
+  if (actorRole === 'SUPER_ADMIN') return rolesCache;
+  const actorLevel = ROLE_LEVELS[actorRole] != null ? ROLE_LEVELS[actorRole] : 20;
+  return rolesCache.filter(function(r){
+    if (r.name === 'SUPER_ADMIN') return false;
+    const lvl = ROLE_LEVELS[r.name] != null ? ROLE_LEVELS[r.name] : 0;
+    return lvl < actorLevel;
+  });
 }
 
 function roleBadgeKind(role){
@@ -2411,7 +2443,13 @@ async function loadEmployees(){
     const deptSel = $id('empDept'), posSel = $id('empPos');
     fillSelect(deptSel, departments, deptSel ? deptSel.value : '', 'Phòng ban');
     fillSelect(posSel, positions, posSel ? posSel.value : '', 'Chức vụ');
-    renderNamedList('deptTbody', departments, 'Phòng ban', deleteDepartment);
+    renderNamedList('deptTbody', departments, 'Phòng ban', deleteDepartment, {
+      extra: function(item){
+        const quota = Number(item.quota_bytes || 0);
+        return quota ? ' ' + badge(fmtBytes(quota), 'info') : '';
+      },
+      onEdit: can('employees.manage') ? editDepartment : null
+    });
     renderNamedList('posTbody', positions, 'Chức vụ', deletePosition);
 
     let accounts = [];
@@ -2422,8 +2460,11 @@ async function loadEmployees(){
     employees.forEach(function(emp){
       if (emp.username) profiles[String(emp.username).toLowerCase()] = true;
     });
+    const profileRoles = ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER', 'TEAM_LEADER',
+                          'EMPLOYEE', 'INTERN', 'GUEST'];
     const missing = accounts.filter(function(acc){
-      return String(acc.role || '').toUpperCase() === 'EMPLOYEE' &&
+      const role = String(acc.role || '').toUpperCase();
+      return profileRoles.indexOf(role) !== -1 &&
         !profiles[String(acc.username || '').toLowerCase()];
     });
     const rows = employees.concat(missing.map(function(acc){
@@ -2465,7 +2506,8 @@ async function loadEmployees(){
   }
 }
 
-function renderNamedList(tbodyId, items, label, onDelete){
+function renderNamedList(tbodyId, items, label, onDelete, opts){
+  opts = opts || {};
   const tb = $id(tbodyId);
   if (!tb) return;
   if (!items.length){
@@ -2476,13 +2518,56 @@ function renderNamedList(tbodyId, items, label, onDelete){
   items.forEach(function(item){
     const tr = document.createElement('tr');
     tr.innerHTML =
-      td(label, '<span class="name">' + esc(item.name) + '</span>') +
+      td(label, '<span class="name">' + esc(item.name) + '</span>' +
+        (opts.extra ? opts.extra(item) : '')) +
       td('Hành động', '', 'cell-actions');
     if (can('employees.manage')){
+      if (opts.onEdit){
+        tr.lastElementChild.appendChild(mkBtn('pencil', 'Sửa ' + label.toLowerCase(),
+          'btn-secondary', function(){ opts.onEdit(item); }));
+      }
       tr.lastElementChild.appendChild(mkBtn('trash', 'Xóa ' + label.toLowerCase(), 'btn-danger',
         function(){ onDelete(item); }));
     }
     tb.appendChild(tr);
+  });
+}
+
+function editDepartment(item){
+  const currentQuota = Number(item.quota_bytes || 0);
+  const mb = currentQuota ? (currentQuota / (1024 * 1024)).toFixed(2) : '';
+  openModal({
+    title: 'Sửa phòng ban "' + item.name + '"',
+    body:
+      '<div class="field"><label for="deptEditName">Tên phòng ban</label>' +
+        '<input id="deptEditName" class="input" value="' + escHtmlAttr(item.name || '') + '" /></div>' +
+      '<div class="field" style="margin-bottom:0;"><label for="deptEditQuota">Hạn mức (MB)</label>' +
+        '<input id="deptEditQuota" class="input" type="number" min="0.1" step="0.1" value="' + escHtmlAttr(mb) + '" />' +
+        '<p class="hint" style="margin-top:6px;">Để trống nếu giữ nguyên hạn mức hiện tại.</p></div>',
+    actions: [
+      { label: 'Hủy', value: null, variant: 'secondary' },
+      { label: 'Lưu', value: function(panel){
+          const name = panel.querySelector('#deptEditName').value.trim();
+          const quotaMb = panel.querySelector('#deptEditQuota').value.trim();
+          const payload = { id: item.id };
+          if (name) payload.name = name;
+          if (quotaMb !== '') payload.quota_bytes = Math.round(parseFloat(quotaMb) * 1024 * 1024);
+          return payload;
+        }, variant: 'primary' }
+    ]
+  }).then(async function(data){
+    if (!data) return;
+    if (data.quota_bytes != null && (!Number.isFinite(data.quota_bytes) || data.quota_bytes <= 0)){
+      toast('Hạn mức phải là số dương', 'warn');
+      return;
+    }
+    try {
+      await api('POST', '/ent/departments/update', data);
+      toast('Đã cập nhật phòng ban');
+      loadEmployees();
+    } catch (e){
+      toast(e.message, 'err');
+    }
   });
 }
 
@@ -2711,10 +2796,42 @@ function delPxe(name){
 /* ============================================================
    Versions
    ============================================================ */
+async function loadVersionFileList(){
+  const sel = $id('verName');
+  if (!sel) return;
+  const previous = sel.value;
+  try {
+    const files = [];
+    await collectFiles('', 0, files);
+    sel.innerHTML = '<option value="">— Chọn tệp —</option>' + files.map(function(path){
+      return '<option value="' + escHtmlAttr(path) + '">' + esc(path) + '</option>';
+    }).join('');
+    if (files.indexOf(previous) !== -1) sel.value = previous;
+  } catch (e){
+    toast('Không tải được danh sách tệp: ' + e.message, 'err');
+  }
+}
+
+async function collectFiles(path, depth, acc){
+  if (depth > 3 || acc.length >= 300) return;
+  const d = await api('GET', '/files?path=' + encodeURIComponent(path));
+  const entries = (d.entries || []).slice().sort(function(a, b){
+    return String(a.name).localeCompare(String(b.name), 'vi');
+  });
+  for (const entry of entries){
+    const name = String(entry.name || '');
+    if (!name) continue;
+    const rel = entry.relative_path || (path ? path + '/' + name : name);
+    const isDir = !!(entry.is_dir || entry.is_directory);
+    if (isDir) await collectFiles(rel, depth + 1, acc);
+    else acc.push(rel);
+  }
+}
+
 async function loadVersions(){
   const n = $id('verName').value.trim();
   const tb = $id('versionsTbody');
-  if (!n){ toast('Nhập tên file cần xem phiên bản', 'warn'); return; }
+  if (!n){ toast('Chọn tệp cần xem phiên bản', 'warn'); return; }
   skeletonRows(tb, 5, 4);
   await withBusy($id('loadVersionsBtn'), async function(){
     try {
@@ -2766,19 +2883,59 @@ function restoreVer(name, version){
 /* ============================================================
    Quota
    ============================================================ */
+async function loadQuotaDepartments(){
+  const sel = $id('quotaDep');
+  if (!sel) return;
+  const previous = sel.value;
+  try {
+    const d = await api('GET', '/ent/departments');
+    const departments = d.departments || [];
+    sel.innerHTML = '<option value="">— Chọn phòng ban —</option>' + departments.map(function(dep){
+      return '<option value="' + escHtmlAttr(dep.id) + '">' + esc(dep.name) + '</option>';
+    }).join('');
+    if (departments.some(function(dep){ return String(dep.id) === String(previous); })) {
+      sel.value = previous;
+    }
+  } catch (e){
+    toast('Không tải được phòng ban: ' + e.message, 'err');
+  }
+}
+
+async function saveQuotaLimit(){
+  const dep = $id('quotaDep').value;
+  const limit = $id('quotaLimit').value;
+  if (!dep){ toast('Chọn phòng ban', 'warn'); return; }
+  if (!limit || Number(limit) <= 0){ toast('Nhập hạn mức mới (bytes) lớn hơn 0', 'warn'); return; }
+  await withBusy($id('saveQuotaBtn'), async function(){
+    try {
+      await api('POST', '/ent/departments/update', {
+        id: dep, quota_bytes: Math.round(Number(limit))
+      });
+      toast('Đã lưu hạn mức phòng ban');
+      $id('quotaLimit').value = '';
+      loadQuota();
+    } catch (e){
+      toast(e.message, 'err');
+    }
+  });
+}
+
 async function loadQuota(){
-  const dep = $id('quotaDep').value.trim();
+  const dep = $id('quotaDep').value;
   const out = $id('quotaResult');
-  if (!dep){ toast('Nhập ID phòng ban', 'warn'); return; }
+  if (!dep){ toast('Chọn phòng ban', 'warn'); return; }
   await withBusy($id('loadQuotaBtn'), async function(){
     try {
       const d = await api('GET', '/v1/departments/' + encodeURIComponent(dep) + '/quota');
       const used = Number(d.used_bytes || 0);
       const limit = Number(d.limit_bytes || 0);
       const percent = Number(d.percent != null ? d.percent : (limit ? used / limit * 100 : 0));
+      const depSel = $id('quotaDep');
+      const depName = depSel && depSel.selectedIndex >= 0
+        ? depSel.options[depSel.selectedIndex].text : dep;
       out.innerHTML =
         '<div class="kv">' +
-          '<dt>Phòng ban</dt><dd>' + esc(dep) + '</dd>' +
+          '<dt>Phòng ban</dt><dd>' + esc(depName) + '</dd>' +
           '<dt>Đã dùng</dt><dd>' + esc(fmtBytes(used)) + '</dd>' +
           '<dt>Hạn mức</dt><dd>' + esc(fmtBytes(limit)) + '</dd>' +
           '<dt>Tỷ lệ</dt><dd>' + badge(percent.toFixed(1) + '%', percent >= 90 ? 'err' : percent >= 70 ? 'warn' : 'ok') + '</dd>' +
@@ -2794,12 +2951,40 @@ async function loadQuota(){
 /* ============================================================
    Simulator & transfer tickets
    ============================================================ */
+async function loadSimConfig(){
+  const note = $id('simCurrent');
+  try {
+    const d = await api('GET', '/v1/simulator/config');
+    const loss = Number(d.loss_rate || 0);
+    const delay = Number(d.delay_ms || 0);
+    const lossSel = $id('simLoss'), delaySel = $id('simDelay');
+    if (lossSel && Array.prototype.some.call(lossSel.options, function(o){ return Number(o.value) === loss; })) {
+      lossSel.value = String(loss);
+    }
+    if (delaySel && Array.prototype.some.call(delaySel.options, function(o){ return Number(o.value) === delay; })) {
+      delaySel.value = String(delay);
+    }
+    if (note){
+      note.textContent = 'Hiện tại: rớt gói ' + (loss * 100).toFixed(0) + '%, độ trễ ' + delay + ' ms.';
+    }
+  } catch (e){
+    if (note) note.textContent = 'Không đọc được cấu hình: ' + e.message;
+  }
+}
+
 async function setSimConfig(){
   const loss = $id('simLoss').value;
   const delay = $id('simDelay').value;
   await withBusy($id('simApplyBtn'), async function(){
     try {
-      await api('POST', '/v1/simulator/config', { loss_rate: parseFloat(loss), delay_ms: parseInt(delay, 10) });
+      const d = await api('POST', '/v1/simulator/config', {
+        loss_rate: parseFloat(loss), delay_ms: parseInt(delay, 10)
+      });
+      if ($id('simCurrent')){
+        $id('simCurrent').textContent =
+          'Hiện tại: rớt gói ' + (Number(d.loss_rate || 0) * 100).toFixed(0) +
+          '%, độ trễ ' + Number(d.delay_ms || 0) + ' ms.';
+      }
       toast('Đã áp dụng cấu hình mô phỏng');
     } catch (e){
       toast(e.message, 'err');
@@ -2815,13 +3000,20 @@ async function authorizeTicket(){
   await withBusy($id('ticketBtn'), async function(){
     try {
       const d = await api('POST', '/v1/transfers/authorize', { filename: f, mode: m });
+      const expires = d.expires_at
+        ? new Date(Number(d.expires_at) * 1000).toLocaleString('vi-VN') : '—';
       out.innerHTML =
         '<div class="kv">' +
-          '<dt>Tệp</dt><dd>' + esc(f) + '</dd>' +
-          '<dt>Chế độ</dt><dd>' + badge(m, 'info') + '</dd>' +
-          '<dt>Vé</dt><dd class="mono">' + esc(d.token || '—') + '</dd>' +
-          '<dt>Hết hạn</dt><dd>' + esc(d.expires_at || '—') + '</dd>' +
-        '</div>';
+          '<dt>Tệp</dt><dd>' + esc(d.filename || f) + '</dd>' +
+          '<dt>Chế độ</dt><dd>' + badge(d.mode || m, 'info') + '</dd>' +
+          '<dt>Cấp cho IP</dt><dd class="mono">' + esc(d.client_ip || '—') + '</dd>' +
+          '<dt>Hết hạn</dt><dd>' + esc(expires) + ' <span class="muted">(' +
+            esc(d.ttl_seconds || 30) + 's)</span></dd>' +
+          '<dt>Bắt buộc vé</dt><dd>' +
+            badge(d.enforced ? 'Có (TFTP_REQUIRE_TICKETS=1)' : 'Không', d.enforced ? 'warn' : 'neutral') +
+          '</dd>' +
+        '</div>' +
+        '<p class="hint" style="margin-top:8px;">Vé dùng 1 lần. Nếu server bật yêu cầu vé, chạy client TFTP từ đúng IP trên trong vòng 30 giây.</p>';
       toast('Đã cấp vé truyền tệp');
     } catch (e){
       toast(e.message, 'err');

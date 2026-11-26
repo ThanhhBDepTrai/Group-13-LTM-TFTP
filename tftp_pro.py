@@ -19,6 +19,7 @@ from pathlib import Path
 from admin_api import AdminAPIServer
 from auth import AuthManager
 from metrics import MetricsCollector
+from network_simulator import NetworkFaultInjector
 from packet_trace import PacketTracer
 from pxe_config import PxeManager
 from tftp_config import (
@@ -36,6 +37,7 @@ from tftp_config import (
     DEFAULT_TIMEOUT,
 )
 from tftp_server import ServerConfig, TFTPServer
+from transfer_ticket import TransferTicketManager
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +111,21 @@ def main(argv=None) -> int:
         args.metrics_db or Path(args.admin_db).with_suffix(".metrics.db")
     )
     tracer = PacketTracer()
-    server = TFTPServer(config, metrics=metrics, tracer=tracer)
+    fault_injector = NetworkFaultInjector()
+    transfer_tickets = TransferTicketManager()
+    require_tickets = os.environ.get("TFTP_REQUIRE_TICKETS", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    server = TFTPServer(
+        config,
+        metrics=metrics,
+        tracer=tracer,
+        auth_required=require_tickets,
+        transfer_tickets=transfer_tickets,
+        fault_injector=fault_injector,
+    )
     server.storage.ensure_layout()
     pxe = PxeManager(server.storage, args.pxe_profiles)
 
@@ -171,6 +187,9 @@ def main(argv=None) -> int:
             enterprise=enterprise,
             host=args.admin_host,
             port=args.admin_port,
+            transfer_tickets=transfer_tickets,
+            fault_injector=fault_injector,
+            tickets_enforced=require_tickets,
         )
         api.start()
         logger.info("Admin API: %s", api.url)
@@ -241,7 +260,15 @@ def ensure_local_server_running(admin_password: str, root_dir: str):
                 str(admin_db).replace(".db", ".metrics.db")
             )
             tracer = PacketTracer()
-            server = TFTPServer(config, metrics=metrics, tracer=tracer)
+            fault_injector = NetworkFaultInjector()
+            transfer_tickets = TransferTicketManager()
+            server = TFTPServer(
+                config,
+                metrics=metrics,
+                tracer=tracer,
+                transfer_tickets=transfer_tickets,
+                fault_injector=fault_injector,
+            )
             server.storage.ensure_layout()
             pxe = PxeManager(server.storage, "pxe_profiles.json")
             auth = AuthManager(str(admin_db))
@@ -254,6 +281,8 @@ def ensure_local_server_running(admin_password: str, root_dir: str):
                 pxe=pxe,
                 host="127.0.0.1",
                 port=6971,
+                transfer_tickets=transfer_tickets,
+                fault_injector=fault_injector,
             )
             api.start()
             server.serve_forever()

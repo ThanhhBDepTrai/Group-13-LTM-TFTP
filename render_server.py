@@ -34,6 +34,8 @@ def _start_backend() -> subprocess.Popen:
         str(ENTERPRISE_DB),
         "--enterprise-root",
         str(ENTERPRISE_ROOT),
+        "--root",
+        str(ENTERPRISE_ROOT),
     ]
     proc = subprocess.Popen(
         cmd,
@@ -142,6 +144,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         data = target.read_bytes()
         content_type = "text/html; charset=utf-8"
+        # Cache control handled by meta tags in HTML
         if target.suffix == ".css":
             content_type = "text/css; charset=utf-8"
         elif target.suffix == ".js":
