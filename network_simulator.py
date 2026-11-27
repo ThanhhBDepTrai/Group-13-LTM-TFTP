@@ -36,7 +36,7 @@ MAX_DELAY_MS = 500
 
 def _validate_loss(value: Any) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"loss_rate must be a number, got {value!r}")
+        raise TypeError(f"loss_rate must be a number, got {value!r}")
     number = float(value)
     if math.isnan(number) or not 0.0 <= number <= MAX_LOSS_RATE:
         raise ValueError(f"loss_rate must be in 0.0..{MAX_LOSS_RATE}, got {value!r}")
@@ -45,7 +45,7 @@ def _validate_loss(value: Any) -> float:
 
 def _validate_delay(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"delay_ms must be a number, got {value!r}")
+        raise TypeError(f"delay_ms must be a number, got {value!r}")
     if isinstance(value, float):
         if math.isnan(value) or not value.is_integer():
             raise ValueError(f"delay_ms must be a whole number, got {value!r}")

@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -32,6 +33,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tftp_client import TFTPClient
+
+logger = logging.getLogger(__name__)
 
 CASES = [
     ("A - Baseline", 512, 1),
@@ -191,8 +194,8 @@ def run_benchmark_suite(
                 if cleanup is not None:
                     try:
                         cleanup(remote)
-                    except Exception:  # noqa: BLE001 - dọn dẹp không được làm hỏng kết quả
-                        pass
+                    except Exception as exc:  # noqa: BLE001 - dọn dẹp không được làm hỏng kết quả
+                        logger.debug("Bỏ qua lỗi dọn dẹp %s: %s", remote, exc)
 
             throughput = 0.0
             if status != "FAILED" and elapsed > 0:

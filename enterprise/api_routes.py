@@ -87,9 +87,13 @@ def handle(handler, svc, method: str, path: str, query: dict) -> bool:
         new_password = str(b.get("new_password", ""))
         if target != user["username"]:
             svc.permissions.require(user, "users.manage")
-        elif not svc.permissions.has(user["role"], "users.manage"):
-            if not svc.accounts.verify_password(user["username"], str(b.get("current_password", ""))):
-                raise EnterpriseError("Mật khẩu hiện tại không đúng", 403)
+        elif (
+            not svc.permissions.has(user["role"], "users.manage")
+            and not svc.accounts.verify_password(
+                user["username"], str(b.get("current_password", ""))
+            )
+        ):
+            raise EnterpriseError("Mật khẩu hiện tại không đúng", 403)
         svc.accounts.change_password(target, new_password)
         svc.audit.log(user["username"], "user.password", target)
         send(200, {"status": "ok", "username": target})

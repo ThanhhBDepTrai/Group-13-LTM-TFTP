@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from auth import MIN_PASSWORD_LENGTH, AuthError, AuthManager  # noqa: E402
+from auth import AuthError, AuthManager
 
 
 def _utf8_console() -> None:

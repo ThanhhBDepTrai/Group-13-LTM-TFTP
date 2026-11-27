@@ -7,6 +7,7 @@ và ghi audit. Các module TFTP cũ không bị thay đổi: chỉ cần gọi
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from database.database import Database
@@ -27,6 +28,8 @@ from enterprise.server.server_manager import ServerManager
 from enterprise.tasks.task_manager import TaskManager
 
 _TRANSFER_ACTION = {"RRQ": ("read", "files.read"), "WRQ": ("write", "files.upload")}
+
+logger = logging.getLogger(__name__)
 
 
 class EnterpriseService:
@@ -73,16 +76,16 @@ class EnterpriseService:
         for username, role, full_name in demos:
             try:
                 self.accounts.get_user(username)
-            except Exception:
+            except EnterpriseError:
                 try:
                     self.accounts.create_user(username, password, role)
-                except Exception:
+                except EnterpriseError:
                     continue
             # ensure profile exists (best effort)
             try:
                 self.employees.create(full_name, username=username)
-            except Exception:
-                pass
+            except EnterpriseError as exc:
+                logger.debug("Bỏ qua lỗi tạo hồ sơ cho %s: %s", username, exc)
 
     def authenticate(self, token: str) -> dict:
         return self.accounts.validate_token(token)

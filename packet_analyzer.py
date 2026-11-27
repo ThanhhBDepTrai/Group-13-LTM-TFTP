@@ -138,8 +138,7 @@ class PacketFilter:
             except (TypeError, ValueError):
                 return False
         if wanted.retransmit is not None:
-            if bool(item.get("is_retransmit")) != wanted.retransmit:
-                return False
+            return bool(item.get("is_retransmit")) == wanted.retransmit
         return True
 
 

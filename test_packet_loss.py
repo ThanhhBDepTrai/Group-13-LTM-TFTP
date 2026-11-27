@@ -10,10 +10,10 @@ import time
 
 import pytest
 from helpers import make_client, run_pair, running_server
-
-from network_simulator import NetworkFaultInjector
 from retransmit_analysis import retransmit_summary
 from tftp_transfer import Channel, RemoteError
+
+from network_simulator import NetworkFaultInjector
 
 
 def sha(data: bytes) -> str:

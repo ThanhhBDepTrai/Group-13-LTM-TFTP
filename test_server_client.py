@@ -6,6 +6,7 @@ import threading
 
 import pytest
 from helpers import make_client, running_server, sha256_bytes
+from tftp_transfer import RemoteError, TransferError, TransferTimeout
 
 from tftp_client import TFTPClient
 from tftp_config import ClientConfig
@@ -19,7 +20,6 @@ from tftp_packet import (
     unpack_packet,
 )
 from tftp_server import ServerHooks
-from tftp_transfer import RemoteError, TransferError, TransferTimeout
 
 
 def make_root(tmp_path):
@@ -267,7 +267,7 @@ def test_client_detects_size_mismatch_via_tsize(tmp_path):
     fake.settimeout(3)
 
     def serve():
-        raw, addr = fake.recvfrom(2048)
+        _raw, addr = fake.recvfrom(2048)
         fake.sendto(b"\x00\x06tsize\x001000\x00", addr)
         fake.recvfrom(2048)  # ACK 0
         fake.sendto(b"\x00\x03\x00\x01" + b"a" * 10, addr)  # chỉ 10 byte, ngắn hơn 1000

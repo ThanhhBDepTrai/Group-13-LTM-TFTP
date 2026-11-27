@@ -464,8 +464,8 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
             if app.enterprise is not None and self._enterprise_principal(token) is not None:
                 try:
                     app.enterprise.files.delete(relative)
-                except Exception:  # noqa: BLE001 - metadata co the khong ton tai
-                    pass
+                except Exception as exc:  # noqa: BLE001 - metadata có thể không tồn tại
+                    logger.debug("Bỏ qua lỗi xoá metadata Enterprise: %s", exc)
             self._send_json(200, {"status": "deleted", "path": relative})
             return
 
