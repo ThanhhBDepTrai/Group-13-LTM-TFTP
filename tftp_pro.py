@@ -157,6 +157,12 @@ def main(argv=None) -> int:
                     os.environ.get("TFTP_SUPER_ADMIN_PASSWORD")
                     or os.environ.get("TFTP_ADMIN_PASSWORD")
                 )
+                if not super_pass and os.environ.get("TFTP_DEMO_ACCOUNTS", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                ):
+                    super_pass = "Admin123@"
                 if super_pass:
                     try:
                         enterprise.accounts.create_super_admin(super_user, super_pass)

@@ -50,6 +50,12 @@ def _backend_env() -> dict:
             flush=True,
         )
 
+    # Dam bao SUPER_ADMIN dau tien (neu chua co) cung dung mat khau demo khi bat demo.
+    if demo and (
+        "TFTP_SUPER_ADMIN_PASSWORD" not in env or not env["TFTP_SUPER_ADMIN_PASSWORD"].strip()
+    ):
+        env["TFTP_SUPER_ADMIN_PASSWORD"] = DEMO_ADMIN_PASSWORD
+
     if demo:
         print(
             "[CANH BAO] TFTP_DEMO_ACCOUNTS=1: cac tai khoan demo dang duoc bat. "
