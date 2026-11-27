@@ -27,4 +27,4 @@ jobs:
       - name: Lint
         run: ruff check .
       - name: Test
-        run: pytest -q
+        run: pytest -q --cov=tftp_packet --cov-report=term-missing --cov-fail-under=85

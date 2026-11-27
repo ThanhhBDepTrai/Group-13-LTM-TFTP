@@ -13,7 +13,7 @@ authors = [{ name = "Group 13", email = "group13@example.com" }]
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "ruff>=0.4"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4"]
 
 [project.scripts]
 tftp-server = "tftp_server:main"
@@ -54,3 +54,11 @@ target-version = "py310"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+
+[tool.coverage.run]
+branch = true
+source = ["tftp_packet"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85
