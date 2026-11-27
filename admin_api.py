@@ -1,9 +1,9 @@
-﻿"""REST Admin API tÃ¡ch biá»‡t hoÃ n toÃ n khá»i giao thá»©c TFTP.
+﻿"""REST Admin API tách biệt hoàn toàn khỏi giao thức TFTP.
 
-Máº·c Ä‘á»‹nh bind ``127.0.0.1:6971``. Má»i endpoint quáº£n trá»‹ (trá»« health/login) cáº§n
-``Authorization: Bearer <token>``. API khÃ´ng bao giá» ghi token/máº­t kháº©u vÃ o log.
+Mặc định bind ``127.0.0.1:6971``. Mọi endpoint quản trị (trừ health/login) cần
+``Authorization: Bearer <token>``. API không bao giờ ghi token/mật khẩu vào log.
 
-Cháº¡y Ä‘á»™c láº­p:
+Chạy độc lập:
     python admin_api.py --root server_storage --db tftp_admin.db
 """
 
@@ -63,7 +63,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     # ------------------------------------------------------------------ #
-    # Háº¡ táº§ng HTTP
+    # Hạ tầng HTTP
     # ------------------------------------------------------------------ #
     def log_message(self, fmt, *args):
         logger.info("%s - %s", self.address_string(), fmt % args)
@@ -106,13 +106,13 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         app = self.server.app
         length_header = self.headers.get("Content-Length")
         if length_header is None:
-            raise AdminAPIError("Thiáº¿u Content-Length", 411)
+            raise AdminAPIError("Thiếu Content-Length", 411)
         try:
             length = int(length_header)
         except ValueError as exc:
-            raise AdminAPIError("Content-Length khÃ´ng há»£p lá»‡", 400) from exc
+            raise AdminAPIError("Content-Length không hợp lệ", 400) from exc
         if length < 0 or length > app.max_body:
-            raise AdminAPIError("Body quÃ¡ lá»›n", 413)
+            raise AdminAPIError("Body quá lớn", 413)
         return self.rfile.read(length) if length else b""
 
     def _json_body(self) -> dict:
@@ -122,9 +122,9 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         try:
             data = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise AdminAPIError("JSON khÃ´ng há»£p lá»‡", 400) from exc
+            raise AdminAPIError("JSON không hợp lệ", 400) from exc
         if not isinstance(data, dict):
-            raise AdminAPIError("JSON pháº£i lÃ  object", 400)
+            raise AdminAPIError("JSON phải là object", 400)
         return data
 
     @staticmethod
@@ -140,7 +140,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
     def _authenticate(self, permission: str | None = None) -> tuple[dict, str]:
         header = self.headers.get("Authorization", "")
         if not header.startswith("Bearer "):
-            raise AuthError("Thiáº¿u hoáº·c sai Authorization header", 401)
+            raise AuthError("Thiếu hoặc sai Authorization header", 401)
         token = header[len("Bearer ") :].strip()
         app = self.server.app
         try:
@@ -265,7 +265,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("Admin API error")
             try:
-                self._send_json(500, {"error": "Lá»—i mÃ¡y chá»§ ná»™i bá»™"})
+                self._send_json(500, {"error": "Lỗi máy chủ nội bộ"})
             except OSError:
                 pass
 
@@ -319,7 +319,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
             enterprise_user = self._enterprise_principal(token)
             relative = self._first(query, "path", "")
             if not self._guest_can_read_tree(enterprise_user, relative):
-                raise EnterpriseError("KhÃ´ng cÃ³ quyá»n xem thÆ° má»¥c nÃ y", 403)
+                raise EnterpriseError("Không có quyền xem thư mục này", 403)
             entries = app.storage.list_dir(relative)
             if enterprise_user is not None and enterprise_user.get("role") == "GUEST":
                 entries = [
@@ -517,7 +517,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
             new_password = str(body.get("new_password", ""))
             if caller["role"] != "admin":
                 if target != caller["username"]:
-                    raise AuthError("Chá»‰ Ä‘Æ°á»£c Ä‘á»•i máº­t kháº©u cá»§a chÃ­nh mÃ¬nh", 403)
+                    raise AuthError("Chỉ được đổi mật khẩu của chính mình", 403)
                 app.auth.authenticate(
                     caller["username"], str(body.get("current_password", ""))
                 )
@@ -580,7 +580,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/pxe/profiles" and method in ("POST", "PUT"):
             self._authenticate("pxe.manage")
             if app.pxe is None:
-                raise AdminAPIError("PXE manager chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh", 501)
+                raise AdminAPIError("PXE manager chưa được cấu hình", 501)
             body = self._json_body()
             require_files = self._first(query, "require_files", "0") in (
                 "1",
@@ -594,7 +594,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/pxe/profiles" and method == "DELETE":
             self._authenticate("pxe.manage")
             if app.pxe is None:
-                raise AdminAPIError("PXE manager chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh", 501)
+                raise AdminAPIError("PXE manager chưa được cấu hình", 501)
             app.pxe.delete_profile(self._first(query, "name"))
             self._send_json(200, {"status": "deleted"})
             return
@@ -602,7 +602,7 @@ class _AdminRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/pxe/select" and method == "GET":
             self._authenticate("pxe.read")
             if app.pxe is None:
-                raise AdminAPIError("PXE manager chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh", 501)
+                raise AdminAPIError("PXE manager chưa được cấu hình", 501)
             profile = app.pxe.select_profile(
                 self._first(query, "arch", "bios"),
                 name=self._first(query, "name") or None,
@@ -788,7 +788,7 @@ def main(argv=None) -> int:
     parser.add_argument("--metrics-db", default=None)
     parser.add_argument("--pxe-profiles", default=DEFAULT_PXE_PROFILES)
     parser.add_argument("--enterprise-db", default=None,
-                        help="Báº­t Enterprise File Manager vá»›i database nÃ y")
+                        help="Bật Enterprise File Manager với database này")
     parser.add_argument("--enterprise-root", default="storage/company_files")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
@@ -803,8 +803,8 @@ def main(argv=None) -> int:
     created = auth.ensure_default_admin()
     if created:
         logger.warning(
-            "ÄÃ£ táº¡o tÃ i khoáº£n admin máº·c Ä‘á»‹nh '%s'. Máº­t kháº©u láº¥y tá»« "
-            "TFTP_ADMIN_PASSWORD; hÃ£y Ä‘á»•i máº­t kháº©u trÆ°á»›c khi dÃ¹ng trong LAN.",
+            "Đã tạo tài khoản admin mặc định '%s'. Mật khẩu lấy từ "
+            "TFTP_ADMIN_PASSWORD; hãy đổi mật khẩu trước khi dùng trong LAN.",
             created[0],
         )
     metrics = MetricsCollector(args.metrics_db or Path(args.db).with_suffix(".metrics.db"))
