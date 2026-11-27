@@ -22,11 +22,44 @@ ENTERPRISE_DB = WORKSPACE_DIR / "efm.db"
 ENTERPRISE_ROOT = WORKSPACE_DIR / "files"
 
 
-def _start_backend() -> subprocess.Popen:
+# Chi dung cho moi truong thu nghiem (TFTP_DEMO_ACCOUNTS=1), khong dung khi trien khai that.
+DEMO_ADMIN_PASSWORD = "Admin123@"
+
+
+def _backend_env() -> dict:
+    """Chuan bi bien moi truong cho backend; bat buoc mat khau khi tat che do demo."""
     env = os.environ.copy()
-    if "TFTP_ADMIN_PASSWORD" not in env:
-        env["TFTP_ADMIN_PASSWORD"] = "Admin123@"
-    env.setdefault("TFTP_DEMO_ACCOUNTS", "1")
+    demo = str(env.get("TFTP_DEMO_ACCOUNTS", "1")).strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+    env["TFTP_DEMO_ACCOUNTS"] = "1" if demo else "0"
+
+    if "TFTP_ADMIN_PASSWORD" not in env or not env["TFTP_ADMIN_PASSWORD"].strip():
+        if not demo:
+            raise SystemExit(
+                "Thieu TFTP_ADMIN_PASSWORD. Hay dat bien moi truong nay truoc khi chay, "
+                "hoac bat TFTP_DEMO_ACCOUNTS=1 neu chi thu nghiem tren may local."
+            )
+        env["TFTP_ADMIN_PASSWORD"] = DEMO_ADMIN_PASSWORD
+        print(
+            "[CANH BAO] Dang dung mat khau demo vi thieu TFTP_ADMIN_PASSWORD. "
+            "Khong dung cau hinh nay khi trien khai that.",
+            flush=True,
+        )
+
+    if demo:
+        print(
+            "[CANH BAO] TFTP_DEMO_ACCOUNTS=1: cac tai khoan demo dang duoc bat. "
+            "Dat TFTP_DEMO_ACCOUNTS=0 khi trien khai that.",
+            flush=True,
+        )
+    return env
+
+
+def _start_backend(env: dict) -> subprocess.Popen:
     cmd = [
         sys.executable,
         str(ROOT / "tftp_pro.py"),
@@ -162,7 +195,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    backend = _start_backend()
+    backend = _start_backend(_backend_env())
     try:
         _wait_backend()
     except Exception as exc:  # noqa: BLE001
