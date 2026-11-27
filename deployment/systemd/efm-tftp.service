@@ -1,9 +1,13 @@
 [Unit]
 Description=EFM TFTP Server
 After=network.target
+# EnvironmentFile=-/opt/efm/.env
+
 [Service]
 WorkingDirectory=/opt/efm
-ExecStart=/opt/efm/.venv/bin/python tftp_server.py
+# Dùng chung thư mục file với Admin API để Web/GUI thấy đúng dữ liệu.
+ExecStart=/opt/efm/.venv/bin/python tftp_server.py --root web_workspace/files
 Restart=on-failure
+
 [Install]
 WantedBy=multi-user.target

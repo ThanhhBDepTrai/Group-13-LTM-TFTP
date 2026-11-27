@@ -16,6 +16,7 @@ dist/
 # Runtime data / local state
 tftp_admin.db*
 *.metrics.db*
+web_workspace/efm.db*
 pxe_profiles.json
 server_storage/
 *.downloaded.md

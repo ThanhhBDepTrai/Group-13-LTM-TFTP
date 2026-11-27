@@ -1,9 +1,19 @@
 [Unit]
 Description=EFM Admin API
 After=network.target
+# Ghi đè biến môi trường (TFTP_ADMIN_PASSWORD, TFTP_SUPER_ADMIN_PASSWORD,
+# TFTP_DEMO_ACCOUNTS, TFTP_REQUIRE_TICKETS...) trong /opt/efm/.env
+# EnvironmentFile=-/opt/efm/.env
+
 [Service]
 WorkingDirectory=/opt/efm
-ExecStart=/opt/efm/.venv/bin/python admin_api.py --host 0.0.0.0 --enterprise-db database/tftp_admin.db
+# Workspace Enterprise chạy cùng thư mục file với TFTP server bên dưới.
+ExecStart=/opt/efm/.venv/bin/python admin_api.py \
+    --host 0.0.0.0 \
+    --root web_workspace/files \
+    --enterprise-db web_workspace/efm.db \
+    --enterprise-root web_workspace/files
 Restart=on-failure
+
 [Install]
 WantedBy=multi-user.target

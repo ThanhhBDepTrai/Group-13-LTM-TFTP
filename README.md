@@ -145,6 +145,14 @@ python tftp_gui.py
 Workspace lưu tại `%APPDATA%\TFTPPro\servers\<workspace_id>\efm.db`; registry chỉ lưu cấu hình,
 không lưu mật khẩu. Muốn chuyển máy, sao chép cả thư mục dữ liệu và thư mục file.
 
+> [!IMPORTANT]
+> GUI và Web là **hai workspace độc lập**: GUI dùng `%APPDATA%\TFTPPro\servers\<id>\efm.db`
+> + thư mục file tự chọn, còn Web dùng `web_workspace/efm.db` + `web_workspace/files/`.
+> Tài khoản và file không tự đồng bộ. Muốn dùng chung, hãy chọn **JOIN SERVER** trong GUI và
+> trỏ tới `http://127.0.0.1:6971` của backend Web, hoặc chạy
+> `python scripts/import_workspace.py --from <efm.db> --to web_workspace/efm.db`
+> (chỉ chép tài khoản/nhân sự, mặc định không chép file và không đổi mật khẩu).
+
 ### 3. Chế độ legacy (TFTP + Admin API)
 
 ```powershell
@@ -269,7 +277,13 @@ ruff check .
 ```
 
 CI chạy trên Ubuntu và Windows với Python 3.10, 3.11, 3.12: cài package, lint bằng `ruff` và
-chạy toàn bộ test. Test dùng server local trên cổng ngẫu nhiên, không cần mạng hay dịch vụ ngoài.
+chạy toàn bộ test kèm cổng coverage **85%** cho module gói tin:
+
+```powershell
+python -m pytest -q --cov=tftp_packet --cov-report=term-missing --cov-fail-under=85
+```
+
+Test dùng server local trên cổng ngẫu nhiên, không cần mạng hay dịch vụ ngoài.
 
 Benchmark tốc độ:
 
@@ -286,6 +300,12 @@ python scripts/benchmark_tftp.py --size 2MiB --runs 3
 - SHA-256 chỉ xác nhận nội dung, không thay thế xác thực hay mã hóa đường truyền.
 - Không ghi mật khẩu, token hay khóa API vào README, commit hoặc issue. Dùng giá trị mẫu `<...>`.
 - PXE chỉ quản lý profile và boot file; dự án không triển khai DHCP server.
+- Chỉ hỗ trợ IPv4 và không có rate-limit theo IP; giới hạn tải hiện tại là `max_clients`
+  phiên đồng thời và kích thước body của Admin API.
+- Module Nhiệm vụ (Tasks) mới có backend: bảng `tasks`/`task_assignments` và các endpoint
+  `/api/ent/tasks*`; giao diện Web và GUI chưa có màn hình quản lý nhiệm vụ.
+- Chưa phát hành tag/release chính thức kèm wheel, EXE và SHA-256; `scripts/build_exe.ps1`
+  chỉ là công cụ đóng gói cục bộ.
 
 ## Tài liệu
 
